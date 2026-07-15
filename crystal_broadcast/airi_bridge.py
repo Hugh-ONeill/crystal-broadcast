@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import sys
 
 from pathlib import Path
@@ -48,6 +49,60 @@ def _load_token() -> str:
         raise RuntimeError(
             f"couldn't read AIRI auth token from {CONFIG_PATH} ({e!r}); "
             "is the AIRI desktop app installed?") from e
+
+
+_CODE_FENCE = re.compile(r"```.*?```", re.S)
+# a leaked feed echo: the model repeats the beat it was given. Everything
+# from here on is regurgitation/reasoning, never broadcast copy.
+_BEAT_ECHO = re.compile(r"[_*`\s]*\[\s*(?:BATTLE|MATCH|RESULT)\b", re.I)
+_NOTE_PAREN = re.compile(r"[_*\s]*\((?:note|aside|correction|edit)\b[^)]*\)[_*]*",
+                         re.I)
+_META_SENTENCE = re.compile(
+    r"(?:^|(?<=[.!?]))\s*[^.!?]*\b(?:let me re-?verify|re-?verify|"
+    r"the previous (?:t\d+|turn|line)|i should (?:re-?)?check|as an ai|"
+    r"i cannot|i can't help|battle log|ongoing match|as the commentator|"
+    r"this (?:is|provides) the (?:battle )?log|my (?:role|task) is)\b"
+    r"[^.!?]*[.!?]", re.I)
+_SENTENCE = re.compile(r"[^.!?]*[.!?]+")
+_MAX_SENTENCES = 3
+# thinking-mode tells: once any of these appears the rest is the model's
+# scaffolding (self-talk, re-drafts, stage directions), never broadcast copy
+_THINKING_TELL = re.compile(
+    r"\(\s*(?:done|final|end|executing|ready|proceeding|confidence|"
+    r"self-correction|outputting|the end|no more|start outputting|bye)"
+    r"|\bActually, I\b|\bFinal (?:Response|Final|answer|decision|String)\b"
+    r"|\binternal (?:thought|monologue|dialogue)\b|\bI will just output\b"
+    r"|\bI (?:must not|should not) (?:use|say)\b|\bLet me re-?"
+    r"|\bLet's go\b|\[END\]|\[Final|\bEnd of thought\b|\bStop thinking\b",
+    re.I)
+
+
+def _sanitize(text: str) -> str:
+    """Reduce a raw model reply to clean, spoken broadcast copy.
+
+    Two failure modes to defend against: (1) the character echoes the
+    '[BATTLE T8] ...' beat it was fed and rambles about it; (2) with
+    thinking mode on, Gemma dumps its whole chain-of-thought ('Final
+    Final... Executing... End trace'). A legitimate Prism reply is a single
+    line of 1-2 sentences, so: keep only the first paragraph, cut at the
+    first feed echo or thinking-tell, drop notes/meta/markdown, and hard-cap
+    the sentence count. Nothing multi-paragraph or scaffold-shaped survives."""
+    text = _CODE_FENCE.sub("", text)
+    text = text.split("\n", 1)[0]           # a real reply is one line
+    m = _BEAT_ECHO.search(text)
+    if m:
+        text = text[:m.start()]
+    m = _THINKING_TELL.search(text)
+    if m:
+        text = text[:m.start()]
+    text = _NOTE_PAREN.sub("", text)
+    text = _META_SENTENCE.sub("", text)
+    text = re.sub(r"[_*`#>]{1,}", "", text)   # markdown emphasis/heading/quote
+    text = re.sub(r"\s+", " ", text).strip()
+    sentences = _SENTENCE.findall(text)
+    if len(sentences) > _MAX_SENTENCES:
+        text = "".join(sentences[:_MAX_SENTENCES]).strip()
+    return text
 
 
 def _unwrap(raw: str | bytes) -> dict:

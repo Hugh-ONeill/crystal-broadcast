@@ -34,8 +34,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import websockets
 
-from showdown.airi_bridge import DEFAULT_URL as AIRI_URL, _load_token, _unwrap
-from showdown.prism_relay import _sanitize
+from showdown.airi_bridge import (
+    DEFAULT_URL as AIRI_URL, _load_token, _sanitize, _unwrap)
 
 HTTP_PORT = 8129
 WS_PORT = 8130
