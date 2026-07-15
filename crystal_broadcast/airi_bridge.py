@@ -231,8 +231,12 @@ async def watch(url: str = DEFAULT_URL):
                         continue
                     data = msg.get("data", {})
                     beat = (data.get("text") or "").strip()
-                    reply = ((data.get("message") or {}).get("content")
-                             or "").strip()
+                    message = data.get("message") or {}
+                    cat = message.get("categorization") or {}
+                    # prefer AIRI's extracted 'speech' (drops reasoning) so
+                    # this view matches what the relay speaks into the room
+                    reply = (cat.get("speech")
+                             or message.get("content") or "").strip()
                     stamp = time.strftime("%H:%M:%S")
                     if beat:
                         print(f"\n[{stamp}] {beat}", flush=True)
