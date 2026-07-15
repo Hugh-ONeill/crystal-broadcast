@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Prism — Commentary Overlay</title>
+<style>
+  :root {
+    --accent: #7cdcff;
+    --accent-2: #b18cff;
+    --bar-bg: rgba(12, 14, 22, 0.82);
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    width: 100%; height: 100%;
+    background: transparent;           /* composites over the battle */
+    overflow: hidden;
+    font-family: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  /* lower-third: pinned to the bottom, centered, generous side margins */
+  #wrap {
+    position: fixed;
+    left: 50%;
+    bottom: 28px;                      /* sits inside the lower-third strip */
+    transform: translateX(-50%);
+    width: min(1180px, 88vw);
+    display: flex;
+    justify-content: center;
+    pointer-events: none;
+  }
+  #bar {
+    display: flex;
+    align-items: stretch;
+    width: 100%;
+    background: var(--bar-bg);
+    backdrop-filter: blur(10px) saturate(1.1);
+    -webkit-backdrop-filter: blur(10px) saturate(1.1);
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    border-left: 4px solid var(--accent);
+    border-radius: 12px;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45),
+                0 0 0 1px rgba(0, 0, 0, 0.3);
+    /* hidden state */
+    opacity: 0;
+    transform: translateY(26px);
+    transition: opacity .45s cubic-bezier(.2,.7,.2,1),
+                transform .45s cubic-bezier(.2,.7,.2,1);
+  }
+  #bar.show { opacity: 1; transform: translateY(0); }
+
+  .tag {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    padding: 0 20px 0 22px;
+    border-right: 1px solid rgba(255, 255, 255, 0.08);
+    min-width: 128px;
+  }
+  .tag .name {
+    font-weight: 800;
+    font-size: 21px;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    background: linear-gradient(90deg, var(--accent), var(--accent-2));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .tag .name::before {
+    content: "◆";
+    -webkit-text-fill-color: var(--accent);
+    font-size: 15px;
+  }
+  .tag .role {
+    font-size: 11px;
+    letter-spacing: .2em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.42);
+    margin-top: 3px;
+  }
+
+  .body {
+    display: flex;
+    align-items: center;
+    padding: 18px 26px 18px 24px;
+    flex: 1;
+  }
+  #turn {
+    align-self: flex-start;
+    margin: 3px 16px 0 0;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: .08em;
+    color: rgba(124, 220, 255, 0.85);
+    white-space: nowrap;
+  }
+  #line {
+    color: #f2f5fb;
+    font-size: 27px;
+    line-height: 1.34;
+    font-weight: 500;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+    /* clamp so a runaway line never blows up the bar height */
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  /* text swap animation */
+  #line.swap { animation: rise .4s cubic-bezier(.2,.7,.2,1); }
+  @keyframes rise {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  #status {
+    position: fixed; left: 10px; bottom: 8px;
+    font-size: 11px; color: rgba(255,255,255,.3);
+    font-family: monospace; pointer-events: none;
+    opacity: 0; transition: opacity .3s;
+  }
+  #status.warn { opacity: 1; color: rgba(255, 170, 120, .8); }
+</style>
+</head>
+<body>
+  <div id="wrap">
+    <div id="bar">
+      <div class="tag">
+        <div class="name">Prism</div>
+        <div class="role">Analyst</div>
+      </div>
+      <div class="body">
+        <div id="turn"></div>
+        <div id="line"></div>
+      </div>
+    </div>
+  </div>
+  <div id="status">connecting…</div>
+
+<script>
+  const WS_URL = "ws://127.0.0.1:8130/";
+  const HIDE_AFTER_MS = 14000;   // fade the bar out after this much quiet
+
+  const bar = document.getElementById("bar");
+  const lineEl = document.getElementById("line");
+  const turnEl = document.getElementById("turn");
+  const statusEl = document.getElementById("status");
+  let hideTimer = null;
+
+  function show(text, turn) {
+    if (!text) return;
+    turnEl.textContent = (turn !== null && turn !== undefined) ? ("T" + turn) : "";
+    lineEl.textContent = text;
+    // retrigger the rise animation
+    lineEl.classList.remove("swap");
+    void lineEl.offsetWidth;
+    lineEl.classList.add("swap");
+    bar.classList.add("show");
+    clearTimeout(hideTimer);
+    hideTimer = setTimeout(() => bar.classList.remove("show"), HIDE_AFTER_MS);
+  }
+
+  function setStatus(msg, warn) {
+    statusEl.textContent = msg || "";
+    statusEl.classList.toggle("warn", !!warn);
+  }
+
+  let backoff = 500;
+  function connect() {
+    let ws;
+    try { ws = new WebSocket(WS_URL); }
+    catch (e) { return retry(); }
+
+    ws.onopen = () => { backoff = 500; setStatus("", false); };
+    ws.onmessage = (ev) => {
+      try {
+        const d = JSON.parse(ev.data);
+        show(d.text, d.turn);
+      } catch (e) { /* ignore malformed */ }
+    };
+    ws.onclose = () => retry();
+    ws.onerror = () => { try { ws.close(); } catch (e) {} };
+  }
+  function retry() {
+    setStatus("feed offline — reconnecting…", true);
+    setTimeout(connect, backoff);
+    backoff = Math.min(backoff * 2, 5000);
+  }
+  connect();
+</script>
+</body>
+</html>
