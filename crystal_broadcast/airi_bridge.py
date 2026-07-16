@@ -98,7 +98,15 @@ def _sanitize(text: str) -> str:
     the sentence count. Nothing multi-paragraph or scaffold-shaped survives."""
     text = html.unescape(text)              # "&lt;thought" -> "<thought"
     text = _CODE_FENCE.sub("", text)
-    text = text.split("\n", 1)[0]           # a real reply is one line
+    # a real reply is one line of prose. Wrap-up replies often open with an
+    # echoed "[RESULT] ..." line; skip leading blank/bracket-led lines and
+    # speak the first real one (an echo line is never worth salvaging)
+    lines = text.split("\n")
+    idx = 0
+    while idx < len(lines) and (not lines[idx].strip()
+                                or lines[idx].lstrip().startswith("[")):
+        idx += 1
+    text = lines[idx] if idx < len(lines) else ""
     m = _BEAT_ECHO.search(text)
     if m:
         text = text[:m.start()]
