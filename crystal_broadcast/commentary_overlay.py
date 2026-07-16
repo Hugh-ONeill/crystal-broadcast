@@ -52,6 +52,69 @@ def _turn_of(beat: str):
     return int(m.group(1)) if m else None
 
 
+# --- structured HUD extraction from the beat text --------------------------
+# gen9_player emits beats like:
+#   [BATTLE T14] Last exchange: ... gholdengo (59% hp) vs cinderace (100% hp).
+#   We go for switch zamazenta. Desk read: it's dead even right now, holding
+#   steady. Bodies: us 5 standing, them 4.
+_ACTIVE_RE = re.compile(
+    r"([A-Za-z][\w'.\-]*) \((\d+)% hp\) vs ([A-Za-z][\w'.\-]*) \((\d+)% hp\)")
+_BODIES_RE = re.compile(r"Bodies: us (\d+) standing, them (\d+)")
+_LEFT_RE = re.compile(r"Left standing: us (\d+), them (\d+)")
+_READ_RE = re.compile(r"Desk read: ([^.]+?)(?:\.|$)")
+_TERA_RE = re.compile(r"([A-Za-z][\w'.\-]*) Terastallized into an? (\w+) type")
+# every KO phrasing gen9_player emits — attributed, residual, and the flat
+# fallback lines — so the "big moment" banner never misses a knockout
+_KO_RES = [
+    re.compile(r"knocked out ([A-Za-z][\w'.\-]*)"),
+    re.compile(r"([A-Za-z][\w'.\-]*) went down"),
+    re.compile(r"Their ([A-Za-z][\w'.\-]*) (?:is|are) down"),
+    re.compile(r"We lost ([A-Za-z][\w'.\-]*)"),
+]
+# read phrase -> momentum (our win share, 0=lost .. 1=won); mirrors
+# gen9_player._read_phrase's bands
+_READ_MOMENTUM = [
+    ("all but sealed", 0.93), ("clearly ahead", 0.77), ("real edge", 0.62),
+    ("dead even", 0.50), ("behind in this", 0.35), ("deep trouble", 0.18),
+    ("nearly gone", 0.06),
+]
+
+
+def _parse_beat(beat: str) -> dict:
+    """Pull scoreboard/momentum fields out of the beat text. Missing fields
+    stay None so the panel can degrade gracefully (e.g. MATCH START has no
+    active mons yet)."""
+    hud: dict = {"us": None, "us_hp": None, "them": None, "them_hp": None,
+                 "us_alive": None, "them_alive": None, "mom": None,
+                 "read": None, "moment": None}
+    m = _ACTIVE_RE.search(beat)
+    if m:
+        hud.update(us=m.group(1), us_hp=int(m.group(2)),
+                   them=m.group(3), them_hp=int(m.group(4)))
+    m = _BODIES_RE.search(beat)
+    if m:
+        hud.update(us_alive=int(m.group(1)), them_alive=int(m.group(2)))
+    m = _LEFT_RE.search(beat)  # RESULT beat
+    if m:
+        hud.update(us_alive=int(m.group(1)), them_alive=int(m.group(2)))
+    m = _READ_RE.search(beat)
+    if m:
+        read = m.group(1).strip()
+        hud["read"] = read
+        low = read.lower()
+        hud["mom"] = next((v for k, v in _READ_MOMENTUM if k in low), 0.5)
+    if beat.startswith("[RESULT]"):
+        hud["mom"] = 1.0 if " WIN " in beat else 0.0 if " LOSS " in beat else 0.5
+    # a "big moment" banner: prefer a KO, else a Terastallization
+    ko = next((r.search(beat).group(1) for r in _KO_RES if r.search(beat)), None)
+    tera = _TERA_RE.search(beat)
+    if ko:
+        hud["moment"] = f"KNOCKOUT · {ko}"
+    elif tera:
+        hud["moment"] = f"TERA · {tera.group(1)} → {tera.group(2)}"
+    return hud
+
+
 async def _broadcast(payload: str):
     for c in list(_clients):
         try:
@@ -112,7 +175,9 @@ async def _airi_listener():
                     clean = _sanitize(reply)
                     if not clean:
                         continue
-                    _latest.update(turn=_turn_of(beat), text=clean)
+                    _latest.clear()
+                    _latest.update(turn=_turn_of(beat), text=clean,
+                                   **_parse_beat(beat))
                     print(f"overlay feed -> {clean[:70]}", flush=True)
                     await _broadcast(json.dumps(_latest))
         except (KeyboardInterrupt, asyncio.CancelledError):

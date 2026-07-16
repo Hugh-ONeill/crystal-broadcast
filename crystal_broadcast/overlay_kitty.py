@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Terminal lower-third for the Prism commentator.
+"""Terminal broadcast panel for the Prism commentator.
 
 WebKitGTK crashes on this Hyprland/wlroots setup, but kitty renders fine and
-themes to the desktop — so the caption layer is just a small terminal client
-that reads the overlay feed (commentary_overlay.py on ws://127.0.0.1:8130)
-and reprints the current line, styled. Run it inside a borderless, semi-
-transparent, pinned kitty window (overlay_kitty.sh) as a bottom strip over
-the battle. No Showdown login, no server patch.
+themes to the desktop — so the caption layer is a terminal client that reads
+the overlay feed (commentary_overlay.py on ws://127.0.0.1:8130) and draws a
+lower-third broadcast graphic: a ball tracker + HP bars + momentum meter +
+big-moment banner + Prism's prose. Run it as a tiled kitty panel next to the
+battle browser (overlay_kitty.sh). No Showdown login, no server patch.
 
 Run via:  showdown/overlay_kitty.sh
 """
@@ -25,47 +25,127 @@ import websockets
 
 WS = "ws://127.0.0.1:8130/"
 
-ACCENT = "\033[38;2;124;220;255m"   # cyan
-VIOLET = "\033[38;2;177;140;255m"
-DIM = "\033[38;2;150;160;180m"
-WHITE = "\033[38;2;242;245;251m"
+
+def _c(r, g, b):
+    return f"\033[38;2;{r};{g};{b}m"
+
+
+ACCENT = _c(124, 220, 255)   # cyan
+VIOLET = _c(177, 140, 255)
+GREEN = _c(126, 231, 135)
+AMBER = _c(255, 204, 102)
+RED = _c(255, 107, 107)
+DIM = _c(150, 160, 180)
+FAINT = _c(90, 100, 116)
+WHITE = _c(242, 245, 251)
 BOLD = "\033[1m"
 RESET = "\033[0m"
 CLEAR = "\033[2J\033[3J\033[H"
 HIDE_CURSOR = "\033[?25l"
-RULE = "─"
-DIAMOND = "◆"
-DOT = "·"
 
 
-def render(turn, text: str):
-    size = shutil.get_terminal_size((100, 10))
-    width = min(size.columns - 4, 118)
-    lines = textwrap.wrap(text, width) or [""]
-    tnum = f"  {VIOLET}{BOLD}T{turn}{RESET}" if turn is not None else ""
-    rule = ACCENT + (RULE * min(width, size.columns - 4)) + RESET
-    body = "".join(f"  {WHITE}{ln}{RESET}\n" for ln in lines[:4])
-    header = (f"  {ACCENT}{BOLD}{DIAMOND} PRISM{RESET}"
-              f"  {WHITE}{DOT}{RESET}  {DIM}ANALYST{RESET}{tnum}")
-    sys.stdout.write(f"{CLEAR}\n{header}\n  {rule}\n\n{body}")
+def _pretty(name):
+    return name[:1].upper() + name[1:] if name else "—"
+
+
+def _hp_bar(pct, width=12):
+    if pct is None:
+        return DIM + "·" * width + RESET
+    pct = max(0, min(100, pct))
+    filled = round(pct / 100 * width)
+    color = GREEN if pct > 50 else AMBER if pct > 20 else RED
+    return (color + "█" * filled + FAINT + "░" * (width - filled) + RESET
+            + f" {color}{pct:>3}%{RESET}")
+
+
+def _balls(alive, total=6):
+    if alive is None:
+        alive = total
+    alive = max(0, min(total, alive))
+    return ACCENT + "●" * alive + FAINT + "○" * (total - alive) + RESET
+
+
+def _momentum(mom, width=17):
+    if mom is None:
+        mom = 0.5
+    pos = max(0, min(width - 1, round(mom * (width - 1))))
+    mcolor = GREEN if mom >= 0.5 else RED
+    cells = []
+    for i in range(width):
+        if i == pos:
+            cells.append(f"{mcolor}{BOLD}●{RESET}")
+        else:
+            cells.append(f"{FAINT}─{RESET}")
+    return f"{FAINT}├{RESET}" + "".join(cells) + f"{FAINT}┤{RESET}"
+
+
+def render(s: dict, connected: bool):
+    cols = shutil.get_terminal_size((110, 12)).columns
+    inner = min(cols - 4, 120)
+    rule = ACCENT + "─" * inner + RESET
+
+    # header: left brand, right status + turn
+    dot = (f"{GREEN}●{RESET} {DIM}LIVE{RESET}" if connected
+           else f"{AMBER}○{RESET} {DIM}reconnecting…{RESET}")
+    turn = s.get("turn")
+    ttag = f"{VIOLET}{BOLD}TURN {turn}{RESET}" if turn is not None else ""
+    left_plain = "◆ PRISM · ANALYST"
+    right_plain = ("● LIVE" if connected else "○ reconnecting…") + \
+                  (f"    TURN {turn}" if turn is not None else "")
+    left = f"{ACCENT}{BOLD}◆ PRISM{RESET}  {WHITE}·{RESET}  {DIM}ANALYST{RESET}"
+    right = f"{dot}    {ttag}" if ttag else dot
+    pad = max(1, inner - len(left_plain) - len(right_plain))
+    out = [CLEAR, HIDE_CURSOR, "\n", f"  {left}{' ' * pad}{right}\n",
+           f"  {rule}\n\n"]
+
+    # scoreboard rows
+    us, them = s.get("us"), s.get("them")
+    if us or them or s.get("us_alive") is not None:
+        out.append(f"  {DIM}US  {RESET} {_balls(s.get('us_alive'))}   "
+                   f"{WHITE}{_pretty(us):<13}{RESET}{_hp_bar(s.get('us_hp'))}\n")
+        out.append(f"  {DIM}THEM{RESET} {_balls(s.get('them_alive'))}   "
+                   f"{WHITE}{_pretty(them):<13}{RESET}"
+                   f"{_hp_bar(s.get('them_hp'))}\n")
+        # just the position clause (before the comma); the swing is in prose
+        read = (s.get("read") or "").split(",")[0].strip()
+        out.append(f"  {DIM}MOMENTUM{RESET} {_momentum(s.get('mom'))}  "
+                   f"{DIM}{read[:28]}{RESET}\n")
+
+    # big-moment banner
+    moment = s.get("moment")
+    if moment:
+        mc = RED if moment.startswith("KNOCK") else VIOLET
+        out.append(f"\n  {mc}{BOLD}▸ {moment}{RESET}\n")
+
+    out.append(f"  {rule}\n\n")
+
+    # caption (Prism's prose)
+    text = s.get("text") or ""
+    for ln in textwrap.wrap(text, inner)[:3]:
+        out.append(f"  {WHITE}{ln}{RESET}\n")
+
+    sys.stdout.write("".join(out))
     sys.stdout.flush()
 
 
 async def run():
     sys.stdout.write(HIDE_CURSOR)
-    render(None, "waiting for the desk…")
+    state = {"turn": None, "text": "waiting for the desk…"}
+    render(state, connected=False)
     while True:
         try:
             async with websockets.connect(WS) as ws:
+                render(state, connected=True)
                 async for msg in ws:
                     try:
-                        d = json.loads(msg)
+                        state = json.loads(msg)
                     except Exception:
                         continue
-                    render(d.get("turn"), d.get("text", ""))
+                    render(state, connected=True)
         except (KeyboardInterrupt, asyncio.CancelledError):
             raise
         except Exception:
+            render(state, connected=False)
             await asyncio.sleep(2)
 
 
