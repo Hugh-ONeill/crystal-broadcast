@@ -30,6 +30,7 @@
 from __future__ import annotations
 
 import asyncio
+import html
 import json
 import re
 import sys
@@ -54,7 +55,15 @@ def _load_token() -> str:
 _CODE_FENCE = re.compile(r"```.*?```", re.S)
 # a leaked feed echo: the model repeats the beat it was given. Everything
 # from here on is regurgitation/reasoning, never broadcast copy.
-_BEAT_ECHO = re.compile(r"[_*`\s]*\[\s*(?:BATTLE|MATCH|RESULT)\b", re.I)
+_BEAT_ECHO = re.compile(r"[_*`\s]*\[\s*(?:BATTLE|MATCH|RESULT|bridge-test)\b",
+                        re.I)
+# thinking-tag scaffolding: a reply that opens (or continues) into an
+# XML-ish thought tag is chain-of-thought, never broadcast copy. Replies
+# sometimes arrive HTML-escaped ("&lt;thought"), so _sanitize unescapes
+# entities before this runs.
+_TAG_SCAFFOLD = re.compile(
+    r"<\s*/?\s*(?:thought|think|thinking|reasoning|reason|scratchpad|"
+    r"internal|analysis)\b", re.I)
 _NOTE_PAREN = re.compile(r"[_*\s]*\((?:note|aside|correction|edit)\b[^)]*\)[_*]*",
                          re.I)
 _META_SENTENCE = re.compile(
@@ -87,9 +96,13 @@ def _sanitize(text: str) -> str:
     line of 1-2 sentences, so: keep only the first paragraph, cut at the
     first feed echo or thinking-tell, drop notes/meta/markdown, and hard-cap
     the sentence count. Nothing multi-paragraph or scaffold-shaped survives."""
+    text = html.unescape(text)              # "&lt;thought" -> "<thought"
     text = _CODE_FENCE.sub("", text)
     text = text.split("\n", 1)[0]           # a real reply is one line
     m = _BEAT_ECHO.search(text)
+    if m:
+        text = text[:m.start()]
+    m = _TAG_SCAFFOLD.search(text)
     if m:
         text = text[:m.start()]
     m = _THINKING_TELL.search(text)
@@ -99,6 +112,8 @@ def _sanitize(text: str) -> str:
     text = _META_SENTENCE.sub("", text)
     text = re.sub(r"[_*`#>]{1,}", "", text)   # markdown emphasis/heading/quote
     text = re.sub(r"\s+", " ", text).strip()
+    if text.startswith("["):                  # timestamp/beat fragment, not prose
+        return ""
     sentences = _SENTENCE.findall(text)
     if len(sentences) > _MAX_SENTENCES:
         text = "".join(sentences[:_MAX_SENTENCES]).strip()
