@@ -80,7 +80,7 @@ def _momentum(mom, width=17):
 
 
 def render(s: dict, connected: bool):
-    cols = shutil.get_terminal_size((110, 12)).columns
+    cols, rows = shutil.get_terminal_size((110, 40))
     inner = min(cols - 4, 120)
     rule = ACCENT + "─" * inner + RESET
 
@@ -119,9 +119,17 @@ def render(s: dict, connected: bool):
 
     out.append(f"  {rule}\n\n")
 
-    # caption (Prism's prose)
+    # caption (Prism's prose) — use the panel's real height; a full reply
+    # wraps to 5-6 lines and a hard 3-line cap silently ate the second half
+    used = 6 + (3 if (us or them or s.get("us_alive") is not None) else 0) \
+        + (2 if moment else 0)
+    avail = max(3, rows - used - 1)
     text = s.get("text") or ""
-    for ln in textwrap.wrap(text, inner)[:3]:
+    lines = textwrap.wrap(text, inner)
+    if len(lines) > avail:
+        lines = lines[:avail]
+        lines[-1] = lines[-1][: inner - 2].rstrip() + " …"
+    for ln in lines:
         out.append(f"  {WHITE}{ln}{RESET}\n")
 
     sys.stdout.write("".join(out))
