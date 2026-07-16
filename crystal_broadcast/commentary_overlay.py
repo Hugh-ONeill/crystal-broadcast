@@ -57,19 +57,26 @@ def _turn_of(beat: str):
 #   [BATTLE T14] Last exchange: ... gholdengo (59% hp) vs cinderace (100% hp).
 #   We go for switch zamazenta. Desk read: it's dead even right now, holding
 #   steady. Bodies: us 5 standing, them 4.
+# species are display names and can be multi-word ("Great Tusk", "Iron
+# Valiant"); continuation words are always capitalized, so require that —
+# the old single-word groups truncated ("KNOCKOUT · Tusk"). No '.' in the
+# general class: it let a name swallow the sentence boundary ("Ting-Lu.
+# Zamazenta"), so the four dotted species are explicit literals instead
+_DOTTED = r"Mr\. Mime-Galar|Mr\. Mime|Mr\. Rime|Mime Jr\."
+_NAME = rf"(?:{_DOTTED}|[A-Z][\w'\-]*(?: [A-Z][\w'\-]*)*)"
 _ACTIVE_RE = re.compile(
-    r"([A-Za-z][\w'.\-]*) \((\d+)% hp\) vs ([A-Za-z][\w'.\-]*) \((\d+)% hp\)")
+    rf"({_NAME}) \((\d+)% hp\) vs ({_NAME}) \((\d+)% hp\)")
 _BODIES_RE = re.compile(r"Bodies: us (\d+) standing, them (\d+)")
 _LEFT_RE = re.compile(r"Left standing: us (\d+), them (\d+)")
 _READ_RE = re.compile(r"Desk read: ([^.]+?)(?:\.|$)")
-_TERA_RE = re.compile(r"([A-Za-z][\w'.\-]*) Terastallized into an? (\w+) type")
+_TERA_RE = re.compile(rf"({_NAME}) Terastallized into an? (\w+) type")
 # every KO phrasing gen9_player emits — attributed, residual, and the flat
 # fallback lines — so the "big moment" banner never misses a knockout
 _KO_RES = [
-    re.compile(r"knocked out ([A-Za-z][\w'.\-]*)"),
-    re.compile(r"([A-Za-z][\w'.\-]*) went down"),
-    re.compile(r"Their ([A-Za-z][\w'.\-]*) (?:is|are) down"),
-    re.compile(r"We lost ([A-Za-z][\w'.\-]*)"),
+    re.compile(rf"knocked out ({_NAME})"),
+    re.compile(rf"({_NAME}) went down"),
+    re.compile(rf"Their ({_NAME}) (?:is|are) down"),
+    re.compile(rf"We lost ({_NAME})"),
 ]
 # read phrase -> momentum (our win share, 0=lost .. 1=won); mirrors
 # gen9_player._read_phrase's bands
@@ -175,9 +182,17 @@ async def _airi_listener():
                     clean = _sanitize(reply)
                     if not clean:
                         continue
+                    hud = _parse_beat(beat)
+                    # the desk read is only spoken when it changes, so most
+                    # beats carry none — hold the meter at its last value
+                    # instead of snapping to center (reset on a new match)
+                    if not beat.startswith("[MATCH START]"):
+                        if hud["mom"] is None:
+                            hud["mom"] = _latest.get("mom")
+                        if hud["read"] is None:
+                            hud["read"] = _latest.get("read")
                     _latest.clear()
-                    _latest.update(turn=_turn_of(beat), text=clean,
-                                   **_parse_beat(beat))
+                    _latest.update(turn=_turn_of(beat), text=clean, **hud)
                     print(f"overlay feed -> {clean[:70]}", flush=True)
                     await _broadcast(json.dumps(_latest))
         except (KeyboardInterrupt, asyncio.CancelledError):
