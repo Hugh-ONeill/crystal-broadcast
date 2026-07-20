@@ -23,7 +23,11 @@ from dataclasses import dataclass, field
 # --- beat taxonomy: beat -> (default persona, default priority) -----------
 # From commentary-gold-set-template.md plus the draft's additions (status,
 # status_recovery, hazards, tera, item_denial, lockdown, endgame,
-# wager_segment). Personas: analyst | gremlin | either | both | none.
+# wager_segment) and the engine-signal beats (world_collapse, deep_think;
+# endgame doubles as the solver-took-over beat) — these last three are not
+# protocol events but internal search telemetry the live player injects,
+# the same way it injects belief_delta. Personas: analyst | gremlin |
+# either | both | none.
 TAXONOMY = {
     "ko": ("gremlin", "interrupt"),
     "set_reveal": ("analyst", "interrupt"),
@@ -46,6 +50,9 @@ TAXONOMY = {
     "lockdown": ("either", "interrupt"),
     "endgame": ("analyst", "interrupt"),
     "wager_segment": ("both", "normal"),
+    # engine-signal beats (search telemetry, not protocol)
+    "world_collapse": ("analyst", "normal"),
+    "deep_think": ("gremlin", "interrupt"),
 }
 
 _PRIORITY_RANK = {"interrupt": 3, "normal": 2, "filler": 1, "silence": 0}
@@ -209,6 +216,44 @@ def _swing_phrase(swing: float | None) -> str | None:
     if swing <= -0.03:
         return "momentum slipping away from us"
     return "holding steady"
+
+
+# --- engine-signal prose (the search narrating itself) ---------------------
+# These describe what the SEARCH just did, not a board event. Copy lives here
+# so the player, the gold set, and the tests share one source; the player
+# fills the dynamic bits (revealed count, solved value, the active matchup)
+# from live data, exactly as _belief_prose is composed player-side.
+
+def world_collapse_prose(revealed: int) -> str:
+    """The K sampled opponent-set worlds folded into one — their sets are
+    revealed enough that the speed-pessimistic hedge world is dropped and the
+    full search depth pours into the single real line."""
+    return (f"their sets are pinned down now — with {revealed} of their "
+            "moves revealed the search stopped hedging two possible worlds "
+            "and is spending its full depth on one")
+
+
+def endgame_solved_prose(win_prob: float) -> str:
+    """The exact minimax solver took over from MCTS at low material: this
+    isn't an estimate any more, it's a proven line. win_prob is OUR win
+    share (0..1) from the solved value; state the verdict honestly."""
+    if win_prob >= 0.75:
+        verdict = "and it's winning — the line is forced from here"
+    elif win_prob <= 0.25:
+        verdict = "and it's lost — no line saves it"
+    else:
+        verdict = "and it's razor-thin, down to who mispredicts first"
+    return ("the endgame solver just took over — this low-material spot is "
+            f"solved exactly now, not estimated, {verdict}")
+
+
+def deep_think_prose(me: str | None, opp: str | None) -> str:
+    """The adaptive search hit a genuinely flat position and is burning
+    extra clock on it — the 'hold on, I'm thinking' moment. Names the active
+    matchup so the reacting voice has a grounded subject to grab."""
+    matchup = f"{me} versus {opp}" if me and opp else "this one"
+    return ("nothing separates the options here — the search is spending "
+            f"extra clock to grind {matchup} out")
 
 
 _STATUS_INFLICT = {
@@ -727,6 +772,22 @@ def classify(ev: Event, stats_fn=None, ability_fn=None) -> Beat | None:
                          persona="analyst" if boots else "either",
                          priority="interrupt", register="set-reveal",
                          **ev.data)
+    if t == "world_collapse":
+        # the search dropped its parallel opponent-set worlds down to one:
+        # a certainty gain, PRISM's dry meta-observation (gremlin has no
+        # outrage to hang on the machine simplifying its own model)
+        return make_beat("world_collapse", ev.prose,
+                         register="worlds-collapsed", **ev.data)
+    if t == "endgame_solved":
+        # exact minimax replaced the estimate: analyst's flagship "the game
+        # is provably over" moment. Routes through the endgame beat.
+        return make_beat("endgame", ev.prose, register="solved", **ev.data)
+    if t == "deep_think":
+        # the search paused on a flat position — FRACTURE's "hold on, I'm
+        # thinking" bit (she owns the pilot's deliberation), delivered
+        # out-of-band so it lands DURING the pause (see Director.interject)
+        return make_beat("deep_think", ev.prose, register="deliberating",
+                         **ev.data)
     if t == "ko":
         return make_beat("ko", ev.prose,
                          register="grief" if ev.side == "us" else "triumph",
@@ -895,6 +956,22 @@ class Director:
                 f"Left standing: us {ours_left}, them {theirs_left}. "
                 f"Wrap up the match in a line or two.")
         return text, beat
+
+    def interject(self, kind: str, turn: int, prose: str,
+                  **data) -> tuple[str, Beat] | None:
+        """Compose a standalone, OUT-OF-BAND engine beat — one that must land
+        WHEN it happens (mid-decision) rather than folded into the next
+        per-turn decide() aggregation. The 'hold on, I'm thinking' stall is
+        the case: it has to be spoken while the search is still grinding, not
+        after the move resolves. Framing beats (match_start/match_end) are the
+        same out-of-band pattern. Returns (feed_text, Beat), or None if the
+        kind classifies to nothing. The feed text keeps the '[BATTLE Tn]'
+        shape the overlay's beat gate and turn parser expect."""
+        beat = classify(Event(kind, prose, notable=True, data=dict(data)),
+                        self.stats_fn, self.ability_fn)
+        if beat is None:
+            return None
+        return f"[BATTLE T{turn}] {beat.prose}", beat
 
     # --- the per-decision call ------------------------------------------
     def decide(self, ctx: TurnContext) -> Decision:

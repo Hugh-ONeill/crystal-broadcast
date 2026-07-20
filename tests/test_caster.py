@@ -42,6 +42,25 @@ def test_speaker_policy():
                      "[BATTLE T5]") == ["FRACTURE"]
 
 
+def test_engine_signal_beats_route_correctly():
+    """The three engine-signal beats, classified for real, must route to the
+    intended voice: the search's certainty reads (worlds collapsing, endgame
+    solved) are PRISM's; the 'hold on, thinking' stall is FRACTURE's."""
+    from dataclasses import asdict
+    from showdown.beat_director import (classify, Event, world_collapse_prose,
+                                        endgame_solved_prose, deep_think_prose)
+
+    def route(kind, prose, **data):
+        beat = classify(Event(kind, prose, notable=True, data=data))
+        return _speakers([asdict(beat)], "[BATTLE T30]")
+
+    assert route("world_collapse", world_collapse_prose(15)) == ["PRISM"]
+    assert route("endgame_solved", endgame_solved_prose(0.9),
+                 win_prob=0.9) == ["PRISM"]
+    assert route("deep_think",
+                 deep_think_prose("Gholdengo", "Tusk")) == ["FRACTURE"]
+
+
 def test_correction_loop_transcript_sharing():
     """On a dual beat PRISM's prompt must contain FRACTURE's line — the
     correction loop is real only if the second speaker sees the first."""

@@ -8,7 +8,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from showdown.beat_director import (Director, ProtocolScanner, TurnContext,
-                                    classify, Event)
+                                    classify, Event, world_collapse_prose,
+                                    endgame_solved_prose, deep_think_prose)
 
 
 def _ctx(turn=5, value=0.5, elapsed=30.0, **kw):
@@ -283,6 +284,68 @@ def test_status_without_synergy_stays_despair():
     assert classify(ev, None, af).register == "despair"
     # and with no ability_fn at all, behaviour is unchanged
     assert classify(ev, None, None).register == "despair"
+
+
+# --- engine-signal beats (search telemetry, injected like belief_delta) ---
+
+def test_world_collapse_is_analyst_meta_beat():
+    ev = Event("world_collapse", world_collapse_prose(15), notable=True)
+    b = classify(ev, _stats)
+    assert b.beat == "world_collapse" and b.persona == "analyst"
+    assert b.priority == "normal" and b.register == "worlds-collapsed"
+    assert "15" in b.prose and "sets" in b.prose
+
+
+def test_endgame_solved_routes_through_endgame_beat():
+    ev = Event("endgame_solved", endgame_solved_prose(0.9), notable=True,
+               data={"win_prob": 0.9})
+    b = classify(ev, _stats)
+    # a solver takeover is the analyst's flagship "provably over" interrupt
+    assert b.beat == "endgame" and b.persona == "analyst"
+    assert b.priority == "interrupt" and b.register == "solved"
+    assert "solver" in b.prose and b.data["win_prob"] == 0.9
+
+
+def test_deep_think_is_gremlin_interrupt():
+    ev = Event("deep_think", deep_think_prose("Gholdengo", "Great Tusk"),
+               notable=True)
+    b = classify(ev, _stats)
+    assert b.beat == "deep_think" and b.persona == "gremlin"
+    assert b.priority == "interrupt" and b.register == "deliberating"
+    # names the active matchup so the reacting voice has a grounded subject
+    assert "Gholdengo" in b.prose and "Great Tusk" in b.prose
+
+
+def test_endgame_solved_prose_states_verdict_honestly():
+    assert "winning" in endgame_solved_prose(0.95)
+    assert "lost" in endgame_solved_prose(0.05)
+    assert "razor-thin" in endgame_solved_prose(0.5)
+
+
+def test_interject_composes_out_of_band_beat():
+    d = Director()
+    text, beat = d.interject("deep_think", 33,
+                             deep_think_prose("Kingambit", "Dragonite"))
+    # keeps the '[BATTLE Tn]' feed shape the overlay parser expects
+    assert text.startswith("[BATTLE T33] ")
+    assert beat.beat == "deep_think" and beat.persona == "gremlin"
+    assert "Kingambit" in text
+    # an unknown kind classifies to nothing -> None, never a crash
+    assert d.interject("not_a_beat", 5, "x") is None
+
+
+def test_engine_beat_rides_quiet_turn_decision():
+    """world_collapse / endgame_solved are observed (folded) into the next
+    decision like any notable event — they must force a beat through the
+    gate on an otherwise-quiet turn and land in the composed recap text."""
+    d = Director()
+    d.decide(_ctx(turn=27, value=0.6, elapsed=30.0))  # establish prev
+    d.observe([Event("endgame_solved", endgame_solved_prose(0.9),
+                     notable=True, data={"win_prob": 0.9})])
+    dec = d.decide(_ctx(turn=28, value=0.61, elapsed=6.0))  # sub-interval
+    assert not dec.silence
+    assert "solver" in dec.text
+    assert any(b.beat == "endgame" for b in dec.beats)
 
 
 def test_match_framing_texts():

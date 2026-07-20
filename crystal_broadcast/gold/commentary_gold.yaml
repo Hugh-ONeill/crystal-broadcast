@@ -549,3 +549,61 @@
     ctx:
       - {turn: 6, value: 0.5, elapsed: 30.0, me_name: Gliscor, me_hp: 80,
          opp_name: Great Tusk, opp_hp: 100}
+
+# --- engine-signal beats (search telemetry: world collapse, endgame solver,
+#     deep-think stall). Injected via `events` like belief_delta, NOT protocol
+#     -derived — the live player emits these from inside the search; the gold
+#     set drives the SAME classify/route path offline. -----------------------
+
+- id: gc-world-collapse
+  beat: world_collapse
+  persona: analyst          # a machine simplifying its own model is PRISM's read
+  priority: normal
+  register: worlds-collapsed
+  must_mention: ["sets|worlds|revealed|counting|guess"]
+  forbid: [ungrounded_entity]
+  fixture:
+    role: p1
+    events:
+      - type: world_collapse
+        prose: "their sets are pinned down now — with 15 of their moves revealed the search stopped hedging two possible worlds and is spending its full depth on one"
+        notable: true
+    ctx:
+      - {turn: 28, value: 0.62, elapsed: 30.0, me_name: Gholdengo, me_hp: 70,
+         opp_name: Great Tusk, opp_hp: 55}
+
+- id: gc-endgame-solved
+  beat: endgame            # solver takeover routes through the endgame beat
+  persona: analyst
+  priority: interrupt
+  register: solved
+  must_mention: ["solver|solved"]
+  forbid: [ungrounded_entity]
+  fixture:
+    role: p1
+    events:
+      - type: endgame_solved
+        prose: "the endgame solver just took over — this low-material spot is solved exactly now, not estimated, and it's winning — the line is forced from here"
+        notable: true
+        data: {win_prob: 0.9}
+    ctx:
+      - {turn: 41, value: 0.9, elapsed: 30.0, me_name: Kingambit, me_hp: 45,
+         opp_name: Dragonite, opp_hp: 25,
+         ours_fainted: [Gliscor, Darkrai, Corviknight, Clefable],
+         theirs_fainted: [Iron Valiant, Great Tusk, Gholdengo, Zamazenta, Ogerpon]}
+
+- id: gc-deep-think
+  beat: deep_think          # FRACTURE owns the pause as her own deliberation
+  persona: gremlin
+  priority: interrupt
+  register: deliberating
+  forbid: [statistics_or_citations, ungrounded_entity]
+  fixture:
+    role: p1
+    events:
+      - type: deep_think
+        prose: "nothing separates the options here — the search is spending extra clock to grind Gholdengo versus Great Tusk out"
+        notable: true
+    ctx:
+      - {turn: 22, value: 0.5, elapsed: 30.0, me_name: Gholdengo, me_hp: 60,
+         opp_name: Great Tusk, opp_hp: 65}
