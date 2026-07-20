@@ -31,6 +31,15 @@ def test_speaker_policy():
     assert _speakers([_beat("either", priority="normal")],
                      "[BATTLE T5]") == ["PRISM"]
     assert _speakers([_beat("none")], "[BATTLE T5]") == []
+    # coinciding interrupts owned by different personas: both speak,
+    # fast reaction leads regardless of beat order
+    assert _speakers([_beat("gremlin"), _beat("analyst")],
+                     "[BATTLE T5]") == ["FRACTURE", "PRISM"]
+    assert _speakers([_beat("analyst"), _beat("gremlin")],
+                     "[BATTLE T5]") == ["FRACTURE", "PRISM"]
+    # a normal-priority second beat does not add a voice
+    assert _speakers([_beat("gremlin"), _beat("analyst", priority="normal")],
+                     "[BATTLE T5]") == ["FRACTURE"]
 
 
 def test_correction_loop_transcript_sharing():

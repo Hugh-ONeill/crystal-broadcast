@@ -258,6 +258,7 @@ class ProtocolScanner:
     def reset(self):
         self._hp: dict = {}
         self._weather: str | None = None
+        self._last_move: tuple[str, str] | None = None
 
     def scan(self, messages, role=None) -> list[Event]:
         out: list[Event] = []
@@ -277,6 +278,11 @@ class ProtocolScanner:
 
         def flush():
             nonlocal cur
+            if cur and cur.get("move"):
+                # survives the flush so effects whose protocol line follows
+                # the move (Court Change's -swapsideconditions) can name
+                # their user
+                self._last_move = (cur["mover"], cur["move"])
             if not cur or not cur.get("move"):
                 cur = None
                 return
@@ -383,12 +389,18 @@ class ProtocolScanner:
                 tmpl = _STATUS_INFLICT.get(sm[3])
                 if tmpl:
                     flush()  # emit the causing move first, then its effect
+                    cause = _from_move(sm[4:])
+                    prose = tmpl.format(n=_poke_name(sm[2]))
+                    if cause:
+                        # name the cause or downstream commentary invents
+                        # one (a caster said "Spore" on a beat that only
+                        # read "put Gliscor to sleep")
+                        prose = f"{cause} {prose}"
                     out.append(Event(
-                        "status_applied",
-                        tmpl.format(n=_poke_name(sm[2])),
+                        "status_applied", prose,
                         side=side_of(sm[2]), notable=True,
                         data={"mon": _poke_name(sm[2]), "status": sm[3],
-                              "cause": _from_move(sm[4:])}))
+                              "cause": cause}))
             elif t == "-curestatus" and len(sm) > 3:
                 tmpl = _STATUS_CURE.get(sm[3])
                 if tmpl:
@@ -597,12 +609,19 @@ class ProtocolScanner:
                 # Court Change: hazards/screens change sides in one move —
                 # the same class of swing as a Rapid Spin/Defog clear, but
                 # the protocol emits this dedicated message instead of
-                # -sideend lines, so it was invisible to the scan
+                # -sideend lines, so it was invisible to the scan. Name the
+                # user (from the move line just flushed) or the casters
+                # invent an actor — measured, twice
                 flush()
+                user = (self._last_move[0]
+                        if self._last_move
+                        and self._last_move[1] == "Court Change" else None)
+                who = f"{user}'s Court Change" if user else "Court Change"
                 out.append(Event(
                     "hazard_flip",
-                    "Court Change swapped the hazards and screens "
-                    "onto the opposite sides", notable=True))
+                    f"{who} swapped the hazards and screens "
+                    "onto the opposite sides", notable=True,
+                    data={"user": user} if user else {}))
             elif t == "-weather" and len(sm) > 2:
                 w = sm[2]
                 upkeep = any("[upkeep]" in a for a in sm[3:])
@@ -817,8 +836,10 @@ class Director:
         # desk swing / contradiction beats come from decision context, not
         # protocol events
         if swing is not None and abs(swing) >= self.min_swing:
+            direction = "our way" if swing > 0 else "against us"
             beats.append(make_beat(
-                "desk_swing", direction="up" if swing > 0 else "down",
+                "desk_swing", f"the desk read just swung {direction}",
+                direction="up" if swing > 0 else "down",
                 swing=round(swing, 4)))
 
         # ---- compose the beat text (format unchanged from pre-director:
@@ -877,17 +898,19 @@ class Director:
         disagree = ("material" if body_lead >= 3 and ctx.value < 0.40 else
                     "bodies" if body_lead <= -3 and ctx.value > 0.60 else None)
         if disagree and disagree != self._prev_disagree:
-            beats.append(make_beat("desk_contradiction", kind=disagree,
+            if disagree == "material":
+                line = ("The board and the desk read sharply disagree "
+                        "here: we hold a commanding material lead yet "
+                        "the read is grim.")
+            else:
+                line = ("The board and the desk read sharply disagree "
+                        "here: we trail badly on bodies yet the read "
+                        "stays upbeat.")
+            beats.append(make_beat("desk_contradiction", line,
+                                   kind=disagree,
                                    value=round(ctx.value, 4),
                                    body_lead=body_lead))
-            if disagree == "material":
-                parts.append("The board and the desk read sharply disagree "
-                             "here: we hold a commanding material lead yet "
-                             "the read is grim.")
-            else:
-                parts.append("The board and the desk read sharply disagree "
-                             "here: we trail badly on bodies yet the read "
-                             "stays upbeat.")
+            parts.append(line)
 
         # commit state: comparisons are always against the last SENT beat
         self._prev_value = ctx.value

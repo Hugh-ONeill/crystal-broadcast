@@ -29,7 +29,9 @@ SHARED BROADCAST RULES.
   encouraged.
 
 DELIVERY. The audience already SEES the board and the meter — never
-narrate what is on screen, react to it. Vary your outbursts: never open
+narrate what is on screen, react to it, and NAME what you are reacting
+to (the mon, the move, the crit — outrage without a named target is a
+failed line). Vary your outbursts: never open
 two lines the same way, never reuse a catchphrase twice in one game.
 Register examples (never repeat these verbatim, match their energy):
 - "THAT'S MY SWITCH. I texted Crystal that switch this morning."

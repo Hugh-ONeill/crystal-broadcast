@@ -95,12 +95,25 @@ def _speakers(beats: list[dict], text: str) -> list[str]:
         order = top.get("handoff") or ["gremlin", "analyst"]
         return [{"gremlin": "FRACTURE", "analyst": "PRISM"}[p]
                 for p in order]
-    if persona == "either":
-        return (["FRACTURE"] if top.get("priority") == "interrupt"
-                else ["PRISM"])
     if persona == "none":
         return []
-    return [{"gremlin": "FRACTURE", "analyst": "PRISM"}[persona]]
+    if persona == "either":
+        voices = [("FRACTURE" if top.get("priority") == "interrupt"
+                   else "PRISM")]
+    else:
+        voices = [{"gremlin": "FRACTURE", "analyst": "PRISM"}[persona]]
+    # when another interrupt beat belongs to the OTHER persona (a KO and a
+    # desk contradiction landing together), both voices speak — gremlin
+    # reacts first, the desk follows with meaning
+    for b in beats[1:]:
+        other = {"gremlin": "FRACTURE", "analyst": "PRISM"}.get(
+            b.get("persona"))
+        if (other and other not in voices
+                and b.get("priority") == "interrupt"):
+            voices.append(other)
+    if voices == ["PRISM", "FRACTURE"]:
+        voices = ["FRACTURE", "PRISM"]  # fast reaction leads
+    return voices[:2]
 
 
 class Caster:
@@ -170,12 +183,28 @@ class Caster:
     def _prompt(self, persona: str, item: dict,
                 nudge: str | None = None) -> list[dict]:
         beats = item["beats"]
-        register = next((b.get("register") for b in beats
-                         if b.get("register")), None)
+        # each voice anchors to ITS OWN beat: on a KO + desk-contradiction
+        # turn, FRACTURE reacts to the KO while PRISM addresses the
+        # contradiction — one shared anchor pulled both voices to the KO
+        own_key = "analyst" if persona == "PRISM" else "gremlin"
+        owned = [b for b in beats
+                 if b.get("persona") in (own_key, "both", "either")]
+        pool = owned or beats
+        reg_beat = next((b for b in pool if b.get("register")), None)
+        register = reg_beat.get("register") if reg_beat else None
         transcript = "\n".join(f"{p}: {ln}" for p, ln in self.transcript)
         direction = f"You are {persona}."
         if register:
             direction += f" Register: {register}."
+        # anchor the line to its event or it floats free — measured: a
+        # despair line about a burn that never said "burn", a Tera
+        # analysis that never named the mon. Register-less beats need the
+        # anchor just as much as registered ones.
+        anchor = ((reg_beat or (pool[0] if pool else {})) or {}).get("prose")
+        if anchor:
+            direction += (f" You are reacting to THIS event: {anchor}. "
+                          f"Name the Pokemon involved and the event itself "
+                          f"(the move, the status, the crit) in your line.")
         elif persona == "PRISM" and not beats:
             # plain turn update: rotate the analytic lens so consecutive
             # tasks (and therefore sentence shapes) differ
