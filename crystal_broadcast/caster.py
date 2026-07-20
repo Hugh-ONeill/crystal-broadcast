@@ -53,6 +53,36 @@ DEFAULT_PORT = 8131
 DEFAULT_UPSTREAM = "http://127.0.0.1:11435"
 DEFAULT_MODEL = "gemma4:26b-a4b-it-q4_K_M"
 DEFAULT_GRUDGES = Path(__file__).parent / "grudges.json"
+DEFAULT_EXPERT = "http://127.0.0.1:8001"
+
+# curated "non-obvious mechanics" whose effect PRISM tends to reason wrong
+# from the name alone — when one appears in a beat, pull the real effect
+# from the grounded-rag expert (/retrieve) and inject it. Grows as new
+# hallucinations surface (seeded from the demos: Good as Gold, Drain Punch,
+# Rapid Spin). FRACTURE never gets facts — she's no-citations by contract.
+_MECHANICS = frozenset({
+    # abilities
+    "good as gold", "poison heal", "guts", "magic guard", "levitate",
+    "regenerator", "intimidate", "protosynthesis", "quark drive", "unaware",
+    "prankster", "multiscale", "flash fire", "water absorb", "volt absorb",
+    "storm drain", "lightning rod", "thick fat", "well-baked body",
+    "purifying salt", "mold breaker", "sheer force", "magic bounce",
+    "defiant", "competitive", "beads of ruin", "sword of ruin",
+    "tablets of ruin", "vessel of ruin", "supreme overlord",
+    "poison puppeteer", "toxic debris", "guard dog", "orichalcum pulse",
+    "hadron engine", "contrary", "unburden", "weak armor", "stamina",
+    "anger shell", "opportunist", "flame body", "static", "rough skin",
+    "iron barbs", "quick feet", "marvel scale", "flare boost", "toxic boost",
+    # moves
+    "knock off", "trick", "switcheroo", "court change", "rapid spin",
+    "mortal spin", "defog", "tidy up", "drain punch", "parabolic charge",
+    "sucker punch", "u-turn", "volt switch", "flip turn", "teleport",
+    "encore", "taunt", "destiny bond", "perish song", "whirlwind", "roar",
+    "dragon tail", "circle throw", "leech seed", "curse", "psychic noise",
+    "salt cure", "ceaseless edge", "stone axe", "syrup bomb", "tar shot",
+    "glaive rush", "ruination", "population bomb", "gigaton hammer",
+    "bitter blade", "revival blessing", "future sight", "wish", "trick room",
+})
 
 # generation knobs per persona: FRACTURE runs hot and short, PRISM cool
 # and a touch longer. frequency_penalty pushes against echoing the duo
@@ -125,19 +155,67 @@ def _speakers(beats: list[dict], text: str) -> list[str]:
 
 class Caster:
     def __init__(self, upstream: str, model: str,
-                 grudge_path: str | None = None):
+                 grudge_path: str | None = None,
+                 expert_url: str | None = DEFAULT_EXPERT):
         self.upstream = upstream
         self.model = model
         self.prompts = {p: (PERSONA_DIR / f).read_text()
                         for p, f in _PERSONA_FILE.items()}
         self.grudges = GrudgeLedger.load(grudge_path)
-        self.transcript: deque = deque(maxlen=12)
+        self.expert_url = expert_url          # None disables fact injection
+        self._fact_cache: dict = {}           # mechanic -> fact (abilities
+        self.transcript: deque = deque(maxlen=12)  # /moves don't change)
         self.clients: set = set()
         # skip-don't-queue: newest unspoken turn beat wins; framing beats
         # (MATCH START / RESULT) queue separately and always speak
         self._pending_turn: dict | None = None
         self._pending_framing: deque = deque()
         self._wake = asyncio.Event()
+
+    # --- grounded facts (PRISM only) -----------------------------------
+    def _retrieve_fact(self, name: str) -> str | None:
+        """Pull a mechanic's real effect from the expert (/retrieve). Cached
+        (mechanics are static); a down/absent expert degrades to None so
+        PRISM just reasons as before — never blocks or raises."""
+        if name in self._fact_cache:
+            return self._fact_cache[name]
+        fact = None
+        try:
+            body = json.dumps(
+                {"question": f"what does {name} do in Pokemon"}).encode()
+            req = urllib.request.Request(
+                f"{self.expert_url}/retrieve", data=body,
+                headers={"Content-Type": "application/json"})
+            with urllib.request.urlopen(req, timeout=5) as r:
+                data = json.load(r)
+            passages = data.get("passages") or data.get("results") or []
+            texts = []
+            for p in passages[:2]:
+                t = " ".join((p.get("text") or p.get("content") or "").split())
+                if t:
+                    texts.append(t[:180])
+            if texts:
+                fact = " | ".join(texts)
+                self._fact_cache[name] = fact   # cache hits only
+        except Exception:
+            fact = None
+        return fact
+
+    def _gather_facts(self, beat_text: str) -> list:
+        """(name, fact) for each curated mechanic named in the beat, capped
+        so the prompt and latency stay bounded. Runs in a worker thread."""
+        if not self.expert_url:
+            return []
+        low = beat_text.lower()
+        hits = [m for m in _MECHANICS if m in low]
+        # longest first so 'quick feet' wins over any short substring
+        hits.sort(key=len, reverse=True)
+        facts = []
+        for name in hits[:2]:
+            fact = self._retrieve_fact(name)
+            if fact:
+                facts.append((name, fact))
+        return facts
 
     # --- intake (AIRI-protocol server) ---------------------------------
     async def handle(self, ws):
@@ -224,6 +302,15 @@ class Caster:
         if nudge:
             direction += f" {nudge}"
         user = ""
+        # PRISM's grounded facts: the real effect of any non-obvious
+        # mechanic in the beat, pulled from the expert. Stops the
+        # reason-from-the-name hallucinations (Good as Gold, Drain Punch).
+        # PRISM only — FRACTURE is no-citations by contract.
+        if persona == "PRISM" and item.get("_facts"):
+            lines = "\n".join(f"- {n}: {f}" for n, f in item["_facts"])
+            user += ("GROUNDED FACTS (authoritative — do not state anything "
+                     "that contradicts these; you may cite them):\n"
+                     f"{lines}\n\n")
         # FRACTURE's Book of Grudges: inject the real vendetta for the mon
         # on the field so she can cite it. Only a recorded grudge appears
         # here, which is the whole point — her paranoia has to be earned,
@@ -297,7 +384,13 @@ class Caster:
     async def speak(self, item: dict):
         if item["text"].startswith("[MATCH START]"):
             self.transcript.clear()
-        for persona in _speakers(item["beats"], item["text"]):
+        speakers = _speakers(item["beats"], item["text"])
+        # fetch grounded facts once per beat if PRISM will speak (off the
+        # event loop; cached across turns so it's usually free)
+        if "PRISM" in speakers and item.get("_facts") is None:
+            item["_facts"] = await asyncio.to_thread(
+                self._gather_facts, item["text"])
+        for persona in speakers:
             try:
                 raw = await asyncio.to_thread(self._generate_sync,
                                               persona, item)
@@ -379,12 +472,19 @@ async def main():
     ap.add_argument("--grudges", default=str(DEFAULT_GRUDGES),
                     help="grudge-ledger JSON (FRACTURE's Book of Grudges); "
                          "absent = no grudges, graceful")
+    ap.add_argument("--expert", default=DEFAULT_EXPERT,
+                    help="grounded-rag /retrieve base URL for PRISM's fact "
+                         "injection ('off' disables)")
     args = ap.parse_args()
 
-    caster = Caster(args.upstream, args.model, grudge_path=args.grudges)
+    caster = Caster(args.upstream, args.model, grudge_path=args.grudges,
+                    expert_url=None if args.expert == "off" else args.expert)
     if caster.grudges.ledger:
         print(f"caster: loaded {len(caster.grudges.ledger)} grudges "
               f"from {args.grudges}", flush=True)
+    if caster.expert_url:
+        print(f"caster: PRISM fact injection via {caster.expert_url}",
+              flush=True)
     async with websockets.serve(caster.handle, "127.0.0.1", args.port):
         print(f"caster: duo live on ws://127.0.0.1:{args.port} "
               f"(model {args.model} via {args.upstream})", flush=True)

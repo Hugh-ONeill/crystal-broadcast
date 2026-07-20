@@ -291,7 +291,7 @@ def run_caster(entry: dict, final, upstream: str, model: str) -> list[str]:
     layer: who spoke, what they said, what they must never say."""
     from showdown.caster import Caster
 
-    caster = Caster(upstream, model)
+    caster = Caster(upstream, model, expert_url=None)
     spoken: list[tuple[str, str]] = []
 
     async def collect(beat_text, persona, line, hud):

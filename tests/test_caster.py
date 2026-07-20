@@ -45,7 +45,7 @@ def test_speaker_policy():
 def test_correction_loop_transcript_sharing():
     """On a dual beat PRISM's prompt must contain FRACTURE's line — the
     correction loop is real only if the second speaker sees the first."""
-    c = Caster("http://unused", "test-model")
+    c = Caster("http://unused", "test-model", expert_url=None)
     calls = []
 
     def fake_gen(persona, item):
@@ -67,7 +67,7 @@ def test_correction_loop_transcript_sharing():
 
 
 def test_match_start_resets_transcript():
-    c = Caster("http://unused", "test-model")
+    c = Caster("http://unused", "test-model", expert_url=None)
     c.transcript.append(("PRISM", "leftover from last game"))
     c._generate_sync = lambda persona, item: "fresh line"
     asyncio.run(c.speak({"text": "[MATCH START] New battle vs X.",
@@ -78,7 +78,7 @@ def test_match_start_resets_transcript():
 def test_envelope_parses_like_airi():
     """The published envelope must round-trip through the overlay's
     subscription parsing (superjson unwrap + field extraction)."""
-    c = Caster("http://unused", "test-model")
+    c = Caster("http://unused", "test-model", expert_url=None)
 
     class FakeWS:
         def __init__(self):
@@ -101,7 +101,7 @@ def test_envelope_parses_like_airi():
 
 
 def test_sanitizer_guards_output():
-    c = Caster("http://unused", "test-model")
+    c = Caster("http://unused", "test-model", expert_url=None)
     c._generate_sync = lambda persona, item: "<thought>plan things</thought>"
     sent = []
 
@@ -114,7 +114,7 @@ def test_sanitizer_guards_output():
 
 
 def test_opener_guard_retries_once_with_nudge():
-    c = Caster("http://unused", "test-model")
+    c = Caster("http://unused", "test-model", expert_url=None)
     c.transcript.append(("PRISM", "The search is opting for Earthquake."))
     calls = []
 
@@ -133,7 +133,7 @@ def test_opener_guard_retries_once_with_nudge():
 
 
 def test_opener_guard_ignores_different_openers():
-    c = Caster("http://unused", "test-model")
+    c = Caster("http://unused", "test-model", expert_url=None)
     c.transcript.append(("PRISM", "The search is opting for Earthquake."))
     calls = []
 
@@ -147,7 +147,7 @@ def test_opener_guard_ignores_different_openers():
 
 
 def test_prism_angle_rotates_by_turn():
-    c = Caster("http://unused", "test-model")
+    c = Caster("http://unused", "test-model", expert_url=None)
     prompts = [c._prompt("PRISM", {"text": "[BATTLE T%d] x" % t,
                                    "beats": [], "hud": {"turn": t}})
                for t in (1, 2, 3)]
@@ -164,7 +164,7 @@ def test_prism_angle_rotates_by_turn():
 
 
 def test_fabricated_crit_detection():
-    c = Caster("http://unused", "test-model")
+    c = Caster("http://unused", "test-model", expert_url=None)
     se_beat = {"text": "[BATTLE T14] Bitter Blade knocked out Gholdengo "
                        "with super effective. X vs Y."}
     crit_beat = {"text": "[BATTLE T5] Iron Head landed a critical hit."}
@@ -177,7 +177,7 @@ def test_fabricated_crit_detection():
 
 
 def test_fabricated_crit_triggers_one_regen():
-    c = Caster("http://unused", "test-model")
+    c = Caster("http://unused", "test-model", expert_url=None)
     calls = []
 
     def fake_gen(persona, item, nudge=None, temp_boost=0.0):
@@ -194,7 +194,7 @@ def test_fabricated_crit_triggers_one_regen():
 
 
 def test_fabricated_synergy_detection():
-    c = Caster("http://unused", "test-model")
+    c = Caster("http://unused", "test-model", expert_url=None)
     # beat about a poison with NO ability flag -> naming Poison Heal is invented
     plain = {"text": "[BATTLE T57] badly poisoned Dragonite. X vs Pecharunt."}
     assert c._fabricated_synergy(
@@ -210,7 +210,7 @@ def test_fabricated_synergy_detection():
 
 
 def test_fabricated_synergy_triggers_one_regen():
-    c = Caster("http://unused", "test-model")
+    c = Caster("http://unused", "test-model", expert_url=None)
     calls = []
 
     def fake_gen(persona, item, nudge=None, temp_boost=0.0):
@@ -226,12 +226,41 @@ def test_fabricated_synergy_triggers_one_regen():
     assert "guts" not in c.transcript[-1][1].lower()
 
 
+def test_prism_fact_injection_prism_only():
+    c = Caster("http://unused", "test-model", expert_url="http://x")
+    c._retrieve_fact = lambda name: (
+        "unaffected by other Pokemon's status moves"
+        if name == "good as gold" else None)
+    facts = c._gather_facts("[BATTLE T27] Gholdengo's Good as Gold is up.")
+    assert facts == [("good as gold",
+                      "unaffected by other Pokemon's status moves")]
+    item = {"text": "[BATTLE T27] Gholdengo's Good as Gold.",
+            "beats": [], "hud": {"turn": 27}, "_facts": facts}
+    prism = c._prompt("PRISM", item)[1]["content"]
+    assert "GROUNDED FACTS" in prism and "status moves" in prism
+    # FRACTURE never receives the facts (no-citations contract)
+    frac = c._prompt("FRACTURE", item)[1]["content"]
+    assert "GROUNDED FACTS" not in frac
+
+
+def test_fact_injection_off_and_no_hit():
+    # expert disabled -> no facts, no lookups
+    c = Caster("http://unused", "test-model", expert_url=None)
+    assert c._gather_facts("Good as Gold and Drain Punch everywhere") == []
+    # expert on but no listed mechanic in the beat -> no lookup attempted
+    c2 = Caster("http://unused", "test-model", expert_url="http://x")
+    called = []
+    c2._retrieve_fact = lambda n: called.append(n)
+    assert c2._gather_facts("[BATTLE T2] a routine Earthquake exchange.") == []
+    assert called == []
+
+
 def test_skip_dont_queue():
     """A newer turn beat replaces an unspoken older one; framing beats
     (MATCH START / RESULT) all survive."""
 
     async def scenario():
-        c = Caster("http://unused", "test-model")
+        c = Caster("http://unused", "test-model", expert_url=None)
         spoken = []
 
         async def fake_speak(item):

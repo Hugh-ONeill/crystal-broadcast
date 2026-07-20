@@ -75,7 +75,7 @@ def test_species_resolution_from_replay_log():
 
 
 def test_caster_injects_grudge_for_fracture_only():
-    c = Caster("http://unused", "test-model")
+    c = Caster("http://unused", "test-model", expert_url=None)
     c.grudges = GrudgeLedger({
         "gholdengo": {"name": "Gholdengo", "kos": 4,
                       "victims": {"Darkrai": 4}, "moves": {}}})
@@ -94,7 +94,7 @@ def test_caster_injects_grudge_for_fracture_only():
 def test_missing_ledger_is_graceful():
     assert GrudgeLedger.load(None).ledger == {}
     assert GrudgeLedger.load("/nonexistent/path.json").ledger == {}
-    c = Caster("http://unused", "test-model", grudge_path=None)
+    c = Caster("http://unused", "test-model", grudge_path=None, expert_url=None)
     p = c._prompt("FRACTURE", {"text": "[BATTLE T1] x", "beats": [],
                                "hud": {"them": "Gholdengo"}})
     assert "GRUDGE LEDGER" not in p[1]["content"]
