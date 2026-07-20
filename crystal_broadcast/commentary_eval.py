@@ -55,6 +55,7 @@ class GameData:
 
     def __init__(self):
         self._gen = None
+        self._status_moves = None
 
     @property
     def gen(self):
@@ -62,6 +63,23 @@ class GameData:
             from poke_env.data import GenData
             self._gen = GenData.from_gen(9)
         return self._gen
+
+    def status_moves(self) -> dict:
+        """{status_code: set(lowercased move display names)} — every move
+        that can inflict each status, from its primary `status` field or its
+        `secondary.status` (so all freezing moves, not just Ice Beam).
+        Used to ground a caster naming the move behind a status on the board.
+        (Tri Attack's 1/3 burn/freeze/para rides an onHit callback with no
+        status field, so it isn't captured — a known, harmless gap.)"""
+        if self._status_moves is None:
+            m: dict = {}
+            for e in self.gen.moves.values():
+                code = e.get("status") or (e.get("secondary") or {}).get(
+                    "status")
+                if code and e.get("name"):
+                    m.setdefault(code, set()).add(e["name"].lower())
+            self._status_moves = m
+        return self._status_moves
 
     def stats(self, display_name: str):
         entry = self.gen.pokedex.get(_norm(display_name))
@@ -322,18 +340,16 @@ def run_caster(entry: dict, final, upstream: str, model: str) -> list[str]:
 
     allowed_text = (final.text or "") + " " + " ".join(
         entry.get("allowed_entities", []))
-    # status words ground the moves that inflict them: a beat that says
-    # "badly poisoned" grounds "Toxic", "burned" grounds "Will-O-Wisp",
-    # etc. — naming the status move for a status on the board is not a
-    # hallucination (it's the same event the caster is reacting to)
-    _btl = allowed_text.lower()
-    for cue, moves in (("poison", "toxic"), ("burn", "will-o-wisp"),
-                       ("paralyz", "thunder wave glare"),
-                       ("asleep", "spore sleep powder hypnosis yawn"),
-                       ("sleep", "spore sleep powder hypnosis yawn"),
-                       ("froze", "ice beam"), ("frozen", "ice beam")):
-        if cue in _btl:
-            allowed_text += " " + moves
+    # ground the moves behind a status ON THE BOARD: naming the move that
+    # inflicted a status the caster is reacting to isn't a hallucination.
+    # Keyed on the beats' actual status codes (not prose words), so the
+    # full move family grounds — every freezing move, not a hand-picked one.
+    codes = {b.data.get("status") for b in final.beats if b.data.get("status")}
+    if codes & {"tox", "psn"}:          # poison family: cross-ground both
+        codes |= {"tox", "psn"}
+    smoves = DATA.status_moves()
+    for code in codes:
+        allowed_text += " " + " ".join(smoves.get(code, ()))
     for forbid in entry.get("forbid", []):
         if forbid == "statistics_or_citations":
             for who, ln in spoken:
