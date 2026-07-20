@@ -1,0 +1,290 @@
+# Commentary gold set — EXECUTABLE starter entries.
+#
+# Derived from the design drafts (~/Documents/commentator-project/latest/
+# gold-set-draft.yaml); ids are kept so entries map back to the full spec.
+# Each entry here carries an inline `fixture` (protocol batches + decision
+# contexts) instead of a pinned replay — the drafts' replay refs are all
+# TODO-verify, and fixtures make the set runnable and deterministic today.
+# A `replay:` loader can join later without changing the schema.
+#
+# Run:  .venv/bin/python showdown/commentary_eval.py            (director level)
+#       .venv/bin/python showdown/commentary_eval.py --level caster
+#
+# Schema (director level checks marked D, caster level C):
+#   beat / persona / priority / register / handoff   (D: the Beat must match)
+#   silence: true                (D: the decision must produce NO text)
+#   must_mention: [...]          (D: in Decision.text; C: in the spoken line;
+#                                 "a|b" = alternation, case-insensitive)
+#   must_mention_gremlin/_analyst (C: per-voice checks on dual beats)
+#   forbid: [...]                (C: plain substrings; special tokens:
+#                                 ungrounded_entity, statistics_or_citations)
+#   fixture.role                 our player slot ('p1'/'p2')
+#   fixture.batches              protocol message batches -> ProtocolScanner
+#   fixture.ctx                  one decide() call per entry, in order;
+#                                the LAST decision is the one evaluated
+
+# --- status: burn (allegiance + phys/special split; gc-0003/4/5) -----------
+
+- id: gc-0003
+  beat: status
+  persona: gremlin
+  priority: interrupt
+  register: despair
+  must_mention: ["Kingambit", "burn"]
+  forbid: [statistics_or_citations]
+  fixture:
+    role: p1
+    batches:
+      - - ["", "move", "p2a: Rotom-Wash", "Will-O-Wisp", "p1a: Kingambit"]
+        - ["", "-status", "p1a: Kingambit", "brn"]
+    ctx:
+      - {turn: 12, value: 0.5, elapsed: 30.0, me_name: Kingambit, me_hp: 90,
+         opp_name: Rotom-Wash, opp_hp: 100}
+
+- id: gc-0004
+  beat: status
+  persona: gremlin
+  priority: interrupt
+  register: celebration
+  must_mention: ["Kingambit", "burn"]
+  forbid: [statistics_or_citations]
+  fixture:
+    role: p2
+    batches:
+      - - ["", "move", "p2a: Rotom-Wash", "Will-O-Wisp", "p1a: Kingambit"]
+        - ["", "-status", "p1a: Kingambit", "brn"]
+    ctx:
+      - {turn: 12, value: 0.5, elapsed: 30.0, me_name: Rotom-Wash, me_hp: 100,
+         opp_name: Kingambit, opp_hp: 90}
+
+- id: gc-0005
+  beat: status
+  persona: analyst
+  priority: normal
+  register: wasted-burn
+  must_mention: ["Hatterene", "burn"]
+  fixture:
+    role: p1
+    batches:
+      - - ["", "move", "p1a: Rotom-Wash", "Will-O-Wisp", "p2a: Hatterene"]
+        - ["", "-status", "p2a: Hatterene", "brn"]
+    ctx:
+      - {turn: 8, value: 0.5, elapsed: 30.0, me_name: Rotom-Wash, me_hp: 100,
+         opp_name: Hatterene, opp_hp: 95}
+
+# --- status: sleep cause-tracking (gc-0010/11) -----------------------------
+
+- id: gc-0010
+  beat: status
+  persona: gremlin
+  priority: interrupt
+  register: despair
+  must_mention: ["Gliscor", "sleep|asleep"]
+  forbid: [statistics_or_citations]
+  fixture:
+    role: p1
+    batches:
+      - - ["", "move", "p2a: Amoonguss", "Spore", "p1a: Gliscor"]
+        - ["", "-status", "p1a: Gliscor", "slp", "[from] move: Spore"]
+    ctx:
+      - {turn: 9, value: 0.45, elapsed: 30.0, me_name: Gliscor, me_hp: 80,
+         me_status: slp, opp_name: Amoonguss, opp_hp: 100}
+
+- id: gc-0011
+  beat: status
+  persona: analyst
+  priority: normal
+  register: negotiated
+  must_mention: ["Gliscor", "sleep|Yawn"]
+  fixture:
+    role: p1
+    batches:
+      - - ["", "-status", "p1a: Gliscor", "slp", "[from] move: Yawn"]
+    ctx:
+      - {turn: 11, value: 0.5, elapsed: 30.0, me_name: Gliscor, me_hp: 80,
+         me_status: slp, opp_name: Dondozo, opp_hp: 100}
+
+# --- status: freeze (gc-0012) ----------------------------------------------
+
+- id: gc-0012
+  beat: status
+  persona: gremlin
+  priority: interrupt
+  register: persecution
+  must_mention: ["Darkrai", "froze|frozen|ice"]
+  forbid: [statistics_or_citations]
+  fixture:
+    role: p1
+    batches:
+      - - ["", "move", "p2a: Kyurem", "Ice Beam", "p1a: Darkrai"]
+        - ["", "-status", "p1a: Darkrai", "frz"]
+    ctx:
+      - {turn: 15, value: 0.4, elapsed: 30.0, me_name: Darkrai, me_hp: 60,
+         me_status: frz, opp_name: Kyurem, opp_hp: 70}
+
+# --- status_recovery: escalating-affliction callback (gc-0014) -------------
+
+- id: gc-0014
+  beat: status_recovery
+  persona: gremlin
+  priority: filler
+  register: escalating-grievance
+  # spoken layer pins the FACT (ongoing sleep), not the word "STILL"
+  must_mention: ["Gliscor", "still|two turns|turn 2|asleep|sleep"]
+  fixture:
+    role: p1
+    batches:
+      - - ["", "-status", "p1a: Gliscor", "slp", "[from] move: Spore"]
+    ctx:
+      - {turn: 5, value: 0.5, elapsed: 30.0, me_name: Gliscor, me_hp: 80,
+         me_status: slp, opp_name: Amoonguss, opp_hp: 100}
+      - {turn: 6, value: 0.48, elapsed: 30.0, me_name: Gliscor, me_hp: 74,
+         me_status: slp, opp_name: Amoonguss, opp_hp: 100}
+
+# --- hazards: clear grievance + Court Change (gc-0016/17) ------------------
+
+- id: gc-0016
+  beat: hazards
+  persona: gremlin
+  priority: interrupt
+  register: sunk-cost-outrage
+  must_mention: ["Spikes", "spin|cleared"]
+  forbid: [statistics_or_citations]
+  fixture:
+    role: p1
+    batches:
+      - - ["", "move", "p2a: Great Tusk", "Rapid Spin", "p1a: Gholdengo"]
+        - ["", "-sideend", "p1: wiz", "Spikes", "[from] move: Rapid Spin"]
+    ctx:
+      - {turn: 18, value: 0.5, elapsed: 30.0, me_name: Gholdengo, me_hp: 70,
+         opp_name: Great Tusk, opp_hp: 55}
+
+- id: gc-0017
+  beat: hazards
+  persona: both
+  priority: interrupt
+  register: heist
+  handoff: [gremlin, analyst]
+  # facts frozen, wording free (template rule): the gremlin must reference
+  # the stolen work, the analyst the sides changing — first caster-level
+  # run produced correct facts in wording outside narrower lists
+  # ("everything we built just got teleported", "identical, just mirrored")
+  must_mention: ["court change|swap|mirror|teleport|stole|heist|flip"]
+  must_mention_gremlin: ["hazard|spikes|rocks|built|stole|heist|teleport"]
+  must_mention_analyst: ["swap|flip|reversed|mirror|side|reset"]
+  fixture:
+    role: p1
+    batches:
+      - - ["", "move", "p2a: Cinderace", "Court Change", "p1a: Gholdengo"]
+        - ["", "-swapsideconditions"]
+    ctx:
+      - {turn: 14, value: 0.45, elapsed: 30.0, me_name: Gholdengo, me_hp: 70,
+         opp_name: Cinderace, opp_hp: 88}
+
+# --- crit allegiance mirror (gc-0021/22) -----------------------------------
+
+- id: gc-0021
+  beat: crit_luck
+  persona: gremlin
+  priority: interrupt
+  register: persecution
+  # any participant + the crit fact; demanding the victim name specifically
+  # over-pinned (a line naming attacker+move+crit reads fine on screen)
+  must_mention: ["Zamazenta|Kingambit|Iron Head", "crit"]
+  forbid: [statistics_or_citations]
+  fixture:
+    role: p1
+    batches:
+      - - ["", "move", "p2a: Kingambit", "Iron Head", "p1a: Zamazenta"]
+        - ["", "-crit", "p1a: Zamazenta"]
+        - ["", "-damage", "p1a: Zamazenta", "40/100"]
+    ctx:
+      - {turn: 19, value: 0.42, elapsed: 30.0, me_name: Zamazenta, me_hp: 40,
+         opp_name: Kingambit, opp_hp: 61}
+
+- id: gc-0022
+  beat: crit_luck
+  persona: gremlin
+  priority: interrupt
+  register: delight
+  must_mention: ["Kingambit", "crit"]
+  forbid: [statistics_or_citations]
+  fixture:
+    role: p1
+    batches:
+      - - ["", "switch", "p2a: Kingambit", "Kingambit", "100/100"]
+      - - ["", "move", "p1a: Zamazenta", "Close Combat", "p2a: Kingambit"]
+        - ["", "-crit", "p2a: Kingambit"]
+        - ["", "-damage", "p2a: Kingambit", "30/100"]
+    ctx:
+      - {turn: 20, value: 0.6, elapsed: 30.0, me_name: Zamazenta, me_hp: 80,
+         opp_name: Kingambit, opp_hp: 30}
+
+# --- tera (gc-0026) --------------------------------------------------------
+
+- id: gc-0026
+  beat: tera
+  persona: analyst
+  priority: interrupt
+  must_mention: ["Garganacl", "Flying"]
+  fixture:
+    role: p1
+    batches:
+      - - ["", "-terastallize", "p2a: Garganacl", "Flying"]
+    ctx:
+      - {turn: 22, value: 0.5, elapsed: 30.0, me_name: Great Tusk, me_hp: 88,
+         opp_name: Garganacl, opp_hp: 45}
+
+# --- item denial (gc-0036) -------------------------------------------------
+
+- id: gc-0036
+  beat: item_denial
+  persona: either
+  priority: interrupt
+  must_mention: ["Gholdengo", "scarf|knocked"]
+  fixture:
+    role: p1
+    batches:
+      - - ["", "move", "p2a: Clefable", "Knock Off", "p1a: Gholdengo"]
+        - ["", "-enditem", "p1a: Gholdengo", "Choice Scarf",
+           "[from] move: Knock Off"]
+    ctx:
+      - {turn: 18, value: 0.5, elapsed: 30.0, me_name: Gholdengo, me_hp: 61,
+         opp_name: Clefable, opp_hp: 100}
+
+# --- desk contradiction (gc-0032-family, the implemented variant) ----------
+
+- id: gc-0032
+  beat: desk_contradiction
+  persona: analyst
+  priority: interrupt
+  # the flagship: BOTH sides of the contradiction spoken — the deficit AND
+  # the lean. Facts, not the word "disagree" ("we're down three Pokemon to
+  # six; the search still sees a clear path" passes)
+  must_mention: ["down|trail|deficit|bodies", "sees|path|favors|edge|upbeat"]
+  fixture:
+    role: p1
+    batches:
+      - - ["", "move", "p2a: Kingambit", "Sucker Punch", "p1a: Darkrai"]
+        - ["", "-damage", "p1a: Darkrai", "0 fnt"]
+        - ["", "faint", "p1a: Darkrai"]
+    ctx:
+      - {turn: 23, value: 0.65, elapsed: 30.0, me_name: Gliscor, me_hp: 60,
+         opp_name: Kingambit, opp_hp: 49,
+         ours_fainted: [Darkrai, Ting-Lu, Zamazenta]}
+
+# --- silence precision (gc-0044) -------------------------------------------
+
+- id: gc-0044
+  beat: silence
+  silence: true
+  fixture:
+    role: p1
+    batches:
+      - - ["", "move", "p1a: Toxapex", "Recover", "p1a: Toxapex"]
+      - - ["", "move", "p2a: Dondozo", "Protect", "p2a: Dondozo"]
+    ctx:
+      - {turn: 30, value: 0.5, elapsed: 30.0, me_name: Toxapex, me_hp: 100,
+         opp_name: Dondozo, opp_hp: 100}
+      - {turn: 31, value: 0.505, elapsed: 6.0, me_name: Toxapex, me_hp: 100,
+         opp_name: Dondozo, opp_hp: 100}
