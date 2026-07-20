@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
-"""Broadcast-overlay feed server for the Prism commentator.
+"""Broadcast-overlay feed server for the commentary duo.
 
 Replaces the in-room chat relay (prism_relay.py) with a clean lower-third
-caption: no Showdown login, no server patch, no impersonation. It simply
-subscribes to AIRI's output feed (the same stream airi_bridge.py --watch
-reads) and re-publishes each finalized commentary line to a browser overlay.
+caption: no Showdown login, no server patch, no impersonation. It
+subscribes to the caster's output feed (or real AIRI's — same protocol,
+that's the compatibility hedge) and re-publishes each finalized commentary
+line to a browser overlay.
 
 Two local endpoints:
   * http://127.0.0.1:8129/          -> serves overlay.html (the caption page)
-  * ws://127.0.0.1:8130/            -> pushes {"turn", "text"} per new line
+  * ws://127.0.0.1:8130/            -> pushes {"turn", "text", "persona",
+                                       ...hud} per new line
 
 Two ways to display it, both fed from here:
   * overlay_kitty.sh  — a tiled kitty panel (recommended on this Hyprland
@@ -16,10 +18,12 @@ Two ways to display it, both fed from here:
   * broadcast.html    — a single browser page that iframes the local battle
     with the caption composited on top (local-server only).
 
-Run:  python showdown/commentary_overlay.py
+Run:  python showdown/commentary_overlay.py [--source ws://127.0.0.1:8131]
+      (--source ws://127.0.0.1:6121/ws subscribes to real AIRI instead)
 """
 from __future__ import annotations
 
+import argparse
 import asyncio
 import functools
 import json
@@ -37,6 +41,7 @@ import websockets
 from showdown.airi_bridge import (
     DEFAULT_URL as AIRI_URL, _load_token, _sanitize, _unwrap)
 
+CASTER_URL = "ws://127.0.0.1:8131"
 HTTP_PORT = 8129
 WS_PORT = 8130
 HERE = Path(__file__).parent
@@ -143,17 +148,27 @@ async def _ws_handler(conn):
         _clients.discard(conn)
 
 
-async def _airi_listener():
-    """Subscribe to AIRI, sanitize each finalized reply, publish to overlays.
-    Mirrors airi_bridge.watch()'s connect/keepalive/reconnect behavior."""
+def _auth_token(source: str) -> str:
+    """Real AIRI verifies the token; the caster accepts anything local —
+    but only AIRI has the config file, so don't require it for the caster."""
+    try:
+        return _load_token()
+    except Exception:
+        return "local"
+
+
+async def _source_listener(source: str):
+    """Subscribe to the caster (or real AIRI — same protocol), sanitize
+    each finalized reply, publish to overlays. Mirrors airi_bridge
+    watch()'s connect/keepalive/reconnect behavior."""
     while True:
         try:
-            async with websockets.connect(AIRI_URL) as ws:
+            async with websockets.connect(source) as ws:
                 await ws.send(json.dumps({
                     "type": "module:authenticate",
-                    "data": {"token": _load_token()},
+                    "data": {"token": _auth_token(source)},
                 }))
-                print("overlay feed: connected to AIRI", flush=True)
+                print(f"overlay feed: connected to {source}", flush=True)
                 last_keepalive = time.monotonic()
                 while True:
                     try:
@@ -163,7 +178,7 @@ async def _airi_listener():
                     if time.monotonic() - last_keepalive > 30:
                         await ws.send(json.dumps({
                             "type": "module:authenticate",
-                            "data": {"token": _load_token()},
+                            "data": {"token": _auth_token(source)},
                         }))
                         last_keepalive = time.monotonic()
                     if raw is None:
@@ -183,6 +198,19 @@ async def _airi_listener():
                     if not clean:
                         continue
                     hud = _parse_beat(beat)
+                    # structured HUD from the caster side-channel beats the
+                    # regex parse of the prose wherever present — this is
+                    # the precise win-prob meter (mom = the actual MCTS
+                    # value, not a 7-band phrase reverse-lookup)
+                    side = data.get("hud") or {}
+                    for src_key, dst_key in (("us", "us"), ("them", "them"),
+                                             ("us_hp", "us_hp"),
+                                             ("them_hp", "them_hp"),
+                                             ("us_alive", "us_alive"),
+                                             ("them_alive", "them_alive"),
+                                             ("value", "mom")):
+                        if side.get(src_key) is not None:
+                            hud[dst_key] = side[src_key]
                     # the desk read is only spoken when it changes, so most
                     # beats carry none — hold the meter at its last value
                     # instead of snapping to center (reset on a new match)
@@ -192,13 +220,15 @@ async def _airi_listener():
                         if hud["read"] is None:
                             hud["read"] = _latest.get("read")
                     _latest.clear()
-                    _latest.update(turn=_turn_of(beat), text=clean, **hud)
-                    print(f"overlay feed -> {clean[:70]}", flush=True)
+                    _latest.update(turn=_turn_of(beat), text=clean,
+                                   persona=data.get("persona"), **hud)
+                    who = data.get("persona") or "-"
+                    print(f"overlay feed -> {who}: {clean[:60]}", flush=True)
                     await _broadcast(json.dumps(_latest))
         except (KeyboardInterrupt, asyncio.CancelledError):
             raise
         except Exception as e:
-            print(f"overlay feed: AIRI disconnected ({e!r}); retry 3s",
+            print(f"overlay feed: source disconnected ({e!r}); retry 3s",
                   flush=True)
             await asyncio.sleep(3)
 
@@ -209,11 +239,16 @@ def _serve_http():
 
 
 async def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--source", default=CASTER_URL,
+                    help="commentary source WS (the caster; pass "
+                         f"{AIRI_URL} to subscribe to real AIRI instead)")
+    args = ap.parse_args()
     Thread(target=_serve_http, daemon=True).start()
     print(f"overlay page: http://127.0.0.1:{HTTP_PORT}/overlay.html", flush=True)
     async with websockets.serve(_ws_handler, "127.0.0.1", WS_PORT):
         print(f"overlay ws:   ws://127.0.0.1:{WS_PORT}/", flush=True)
-        await _airi_listener()
+        await _source_listener(args.source)
 
 
 if __name__ == "__main__":

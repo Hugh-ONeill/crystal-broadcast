@@ -79,7 +79,11 @@ def _momentum(mom, width=17):
     return f"{FAINT}├{RESET}" + "".join(cells) + f"{FAINT}┤{RESET}"
 
 
-def render(s: dict, connected: bool):
+SHARD = _c(120, 180, 255)      # FRACTURE's crystal blue
+_SPEAKER_COLOR = {"PRISM": ACCENT, "FRACTURE": SHARD}
+
+
+def render(s: dict, connected: bool, history: list | None = None):
     cols, rows = shutil.get_terminal_size((110, 40))
     inner = min(cols - 4, 120)
     rule = ACCENT + "─" * inner + RESET
@@ -89,10 +93,11 @@ def render(s: dict, connected: bool):
            else f"{AMBER}○{RESET} {DIM}reconnecting…{RESET}")
     turn = s.get("turn")
     ttag = f"{VIOLET}{BOLD}TURN {turn}{RESET}" if turn is not None else ""
-    left_plain = "◆ PRISM · ANALYST"
+    left_plain = "◆ PRISM · FRACTURE"
     right_plain = ("● LIVE" if connected else "○ reconnecting…") + \
                   (f"    TURN {turn}" if turn is not None else "")
-    left = f"{ACCENT}{BOLD}◆ PRISM{RESET}  {WHITE}·{RESET}  {DIM}ANALYST{RESET}"
+    left = (f"{ACCENT}{BOLD}◆ PRISM{RESET}  {WHITE}·{RESET}  "
+            f"{SHARD}{BOLD}FRACTURE{RESET}")
     right = f"{dot}    {ttag}" if ttag else dot
     pad = max(1, inner - len(left_plain) - len(right_plain))
     out = [CLEAR, HIDE_CURSOR, "\n", f"  {left}{' ' * pad}{right}\n",
@@ -119,18 +124,46 @@ def render(s: dict, connected: bool):
 
     out.append(f"  {rule}\n\n")
 
-    # caption (Prism's prose) — use the panel's real height; a full reply
-    # wraps to 5-6 lines and a hard 3-line cap silently ate the second half
+    # caption block — use the panel's real height; a full reply wraps to
+    # 5-6 lines and a hard 3-line cap silently ate the second half. With
+    # the duo live, show the exchange: previous line dimmed, current line
+    # bright, each with a color-coded speaker tag (the sub-second
+    # speaker-identification requirement, solved visually).
     used = 6 + (3 if (us or them or s.get("us_alive") is not None) else 0) \
         + (2 if moment else 0)
     avail = max(3, rows - used - 1)
-    text = s.get("text") or ""
-    lines = textwrap.wrap(text, inner)
-    if len(lines) > avail:
-        lines = lines[:avail]
-        lines[-1] = lines[-1][: inner - 2].rstrip() + " …"
-    for ln in lines:
-        out.append(f"  {WHITE}{ln}{RESET}\n")
+    entries = history or [(s.get("persona"), s.get("text") or "")]
+    blocks = []
+    for i, (persona, text) in enumerate(entries):
+        if not text:
+            continue
+        current = i == len(entries) - 1
+        color = WHITE if current else DIM
+        tag = ""
+        if persona:
+            pc = _SPEAKER_COLOR.get(persona, WHITE)
+            tag = f"{pc}{BOLD}{persona}{RESET}  "
+        wrapped = textwrap.wrap(text, inner - (len(persona) + 2
+                                               if persona else 0))
+        block = []
+        for j, ln in enumerate(wrapped):
+            prefix = tag if j == 0 else " " * (len(persona) + 2
+                                               if persona else 0)
+            block.append(f"  {prefix}{color}{ln}{RESET}\n")
+        blocks.append(block)
+    # newest block gets space first; older ones fill what remains
+    lines_left = avail
+    kept = []
+    for block in reversed(blocks):
+        take = block[:max(0, lines_left)]
+        if len(take) < len(block) and take:
+            take[-1] = take[-1].rstrip("\n")[: inner - 2].rstrip() + " …\n"
+        lines_left -= len(take) + 1  # +1 for the blank spacer
+        kept.append(take)
+    for block in reversed(kept):
+        if block:
+            out.extend(block)
+            out.append("\n")
 
     sys.stdout.write("".join(out))
     sys.stdout.flush()
@@ -139,21 +172,28 @@ def render(s: dict, connected: bool):
 async def run():
     sys.stdout.write(HIDE_CURSOR)
     state = {"turn": None, "text": "waiting for the desk…"}
+    history: list = []
     render(state, connected=False)
     while True:
         try:
             async with websockets.connect(WS) as ws:
-                render(state, connected=True)
+                render(state, connected=True, history=history)
                 async for msg in ws:
                     try:
                         state = json.loads(msg)
                     except Exception:
                         continue
-                    render(state, connected=True)
+                    entry = (state.get("persona"), state.get("text") or "")
+                    # the hub re-sends the latest line to fresh connections;
+                    # don't duplicate it in the exchange history
+                    if entry[1] and (not history or history[-1] != entry):
+                        history.append(entry)
+                        del history[:-2]
+                    render(state, connected=True, history=history)
         except (KeyboardInterrupt, asyncio.CancelledError):
             raise
         except Exception:
-            render(state, connected=False)
+            render(state, connected=False, history=history)
             await asyncio.sleep(2)
 
 

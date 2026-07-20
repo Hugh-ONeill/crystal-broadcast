@@ -16,6 +16,17 @@ PY="$HERE/../.venv/bin/python"
 [ -x "$PY" ] || PY=python3
 LOGDIR="${TMPDIR:-/tmp}"
 
+# 0) caster (detached) — the duo's voice box; headless AIRI stand-in
+if ss -tln 2>/dev/null | grep -q ':8131'; then
+  echo "caster: already up"
+else
+  setsid "$PY" "$HERE/caster.py" </dev/null \
+    >"$LOGDIR/prism-caster.log" 2>&1 &
+  disown
+  for _ in $(seq 1 40); do ss -tln 2>/dev/null | grep -q ':8131' && break; sleep 0.1; done
+  echo "caster: started (log $LOGDIR/prism-caster.log)"
+fi
+
 # 1) feed server (detached)
 if ss -tln 2>/dev/null | grep -q ':8130'; then
   echo "feed server: already up"
