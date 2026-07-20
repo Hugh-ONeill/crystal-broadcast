@@ -259,10 +259,20 @@ class ProtocolScanner:
         self._hp: dict = {}
         self._weather: str | None = None
         self._last_move: tuple[str, str] | None = None
+        # position -> species, from switch/drag/replace details: protocol
+        # position tokens carry NICKNAMES ("p1a: Speak Softly"), and prose
+        # built from them leaks the nickname ("knocked off Speak Softly" —
+        # found scouting real replays; ladder opponents nickname freely)
+        self._species: dict[str, str] = {}
 
     def scan(self, messages, role=None) -> list[Event]:
         out: list[Event] = []
         cur = None
+
+        def name_of(token) -> str:
+            """Position token -> species display name (nickname-proof)."""
+            pos = token.split(":")[0]
+            return self._species.get(pos, _poke_name(token))
 
         def side_of(token) -> str | None:
             sr = token[:2]
@@ -347,9 +357,9 @@ class ProtocolScanner:
             t = sm[1]
             if t == "move":
                 flush()
-                cur = {"mover": _poke_name(sm[2]), "move": sm[3],
+                cur = {"mover": name_of(sm[2]), "move": sm[3],
                        "mover_side": side_of(sm[2]),
-                       "target": _poke_name(sm[4]) if len(sm) > 4 else None,
+                       "target": name_of(sm[4]) if len(sm) > 4 else None,
                        "effect": None, "crit": False, "dmg": None,
                        "missed": False}
             elif t == "-crit" and cur:
@@ -371,13 +381,15 @@ class ProtocolScanner:
                     self._hp[key] = frac
                 if (t == "-damage" and cur and old is not None
                         and frac is not None
-                        and cur.get("target") == _poke_name(sm[2])):
+                        and cur.get("target") == name_of(sm[2])):
                     cur["dmg"] = old - frac
             elif t in ("switch", "drag"):
                 key = sm[2].split(":")[0]
                 self._hp[key] = (_hp_frac(sm[4]) if len(sm) > 4 else 1.0)
+                if len(sm) > 3 and sm[3]:
+                    self._species[key] = sm[3].split(",")[0]
             elif t == "faint" and len(sm) > 2:
-                mon = _poke_name(sm[2])
+                mon = name_of(sm[2])
                 if cur and cur.get("target") == mon:
                     cur["ko"] = True  # attribute to the finishing move
                 else:
@@ -390,7 +402,7 @@ class ProtocolScanner:
                 if tmpl:
                     flush()  # emit the causing move first, then its effect
                     cause = _from_move(sm[4:])
-                    prose = tmpl.format(n=_poke_name(sm[2]))
+                    prose = tmpl.format(n=name_of(sm[2]))
                     if cause:
                         # name the cause or downstream commentary invents
                         # one (a caster said "Spore" on a beat that only
@@ -399,27 +411,27 @@ class ProtocolScanner:
                     out.append(Event(
                         "status_applied", prose,
                         side=side_of(sm[2]), notable=True,
-                        data={"mon": _poke_name(sm[2]), "status": sm[3],
+                        data={"mon": name_of(sm[2]), "status": sm[3],
                               "cause": cause}))
             elif t == "-curestatus" and len(sm) > 3:
                 tmpl = _STATUS_CURE.get(sm[3])
                 if tmpl:
                     flush()
                     out.append(Event(
-                        "status_cured", tmpl.format(n=_poke_name(sm[2])),
+                        "status_cured", tmpl.format(n=name_of(sm[2])),
                         side=side_of(sm[2]), notable=True,
-                        data={"mon": _poke_name(sm[2]), "status": sm[3]}))
+                        data={"mon": name_of(sm[2]), "status": sm[3]}))
             elif t == "cant" and len(sm) > 3:
                 tmpl = _CANT.get(sm[3])
                 if tmpl:
                     flush()
                     out.append(Event(
-                        "cant_move", tmpl.format(n=_poke_name(sm[2])),
+                        "cant_move", tmpl.format(n=name_of(sm[2])),
                         side=side_of(sm[2]), notable=True,
-                        data={"mon": _poke_name(sm[2]), "why": sm[3]}))
+                        data={"mon": name_of(sm[2]), "why": sm[3]}))
             elif t == "-enditem" and len(sm) > 3:
                 flush()
-                mon = _poke_name(sm[2])
+                mon = name_of(sm[2])
                 item = sm[3]
                 by = _from_cause(sm[4:])
                 ate = any("[eat]" in a for a in sm[4:])
@@ -459,24 +471,24 @@ class ProtocolScanner:
                     flush()
                     out.append(Event(
                         "item_tricked",
-                        f"{_poke_name(sm[2])} was handed a {sm[3]} by {by}",
+                        f"{name_of(sm[2])} was handed a {sm[3]} by {by}",
                         side=side_of(sm[2]), notable=True,
-                        data={"mon": _poke_name(sm[2]), "item": sm[3]}))
+                        data={"mon": name_of(sm[2]), "item": sm[3]}))
                 elif by in ("Thief", "Covet", "Magician", "Pickpocket"):
                     flush()
                     out.append(Event(
                         "item_stolen",
-                        f"{_poke_name(sm[2])} swiped a {sm[3]} with {by}",
+                        f"{name_of(sm[2])} swiped a {sm[3]} with {by}",
                         side=side_of(sm[2]), notable=True,
-                        data={"mon": _poke_name(sm[2]), "item": sm[3]}))
+                        data={"mon": name_of(sm[2]), "item": sm[3]}))
                 # plain reveals (switch-in, Frisk) are not dramatic: skip
             elif t == "-terastallize" and len(sm) > 3:
                 flush()
                 out.append(Event(
                     "tera",
-                    f"{_poke_name(sm[2])} Terastallized into a {sm[3]} type",
+                    f"{name_of(sm[2])} Terastallized into a {sm[3]} type",
                     side=side_of(sm[2]), notable=True,
-                    data={"mon": _poke_name(sm[2]), "tera_type": sm[3]}))
+                    data={"mon": name_of(sm[2]), "tera_type": sm[3]}))
             elif t == "-boost" and len(sm) > 4:
                 flush()
                 stat = _STAT.get(sm[3], sm[3])
@@ -486,9 +498,9 @@ class ProtocolScanner:
                 # beat; a defensive/minor +1 just rides along
                 notable = amt >= 2 or sm[3] in ("atk", "spa", "spe")
                 out.append(Event(
-                    "boost", f"{_poke_name(sm[2])} {adv}raised its {stat}",
+                    "boost", f"{name_of(sm[2])} {adv}raised its {stat}",
                     side=side_of(sm[2]), notable=notable,
-                    data={"mon": _poke_name(sm[2]), "stat": sm[3],
+                    data={"mon": name_of(sm[2]), "stat": sm[3],
                           "amount": amt}))
             elif t == "-unboost" and len(sm) > 4:
                 flush()
@@ -496,29 +508,29 @@ class ProtocolScanner:
                 amt = int(sm[4]) if sm[4].lstrip("-").isdigit() else 1
                 adv = "sharply " if amt >= 2 else ""
                 out.append(Event(
-                    "unboost", f"{_poke_name(sm[2])}'s {stat} was {adv}cut",
+                    "unboost", f"{name_of(sm[2])}'s {stat} was {adv}cut",
                     side=side_of(sm[2]),
-                    data={"mon": _poke_name(sm[2]), "stat": sm[3],
+                    data={"mon": name_of(sm[2]), "stat": sm[3],
                           "amount": amt}))
             elif t == "-setboost" and len(sm) > 4:
                 flush()
                 out.append(Event(
                     "boost",
-                    f"{_poke_name(sm[2])} maxed out its "
+                    f"{name_of(sm[2])} maxed out its "
                     f"{_STAT.get(sm[3], sm[3])}",
                     side=side_of(sm[2]), notable=True,
-                    data={"mon": _poke_name(sm[2]), "stat": sm[3],
+                    data={"mon": name_of(sm[2]), "stat": sm[3],
                           "maxed": True}))
             elif t in ("-clearallboost", "-invertboost", "-clearboost"):
                 flush()
                 if t == "-clearallboost":
                     prose = "every stat change was wiped away"
                 elif t == "-invertboost":
-                    prose = (f"{_poke_name(sm[2])}'s stat changes were inverted"
+                    prose = (f"{name_of(sm[2])}'s stat changes were inverted"
                              if len(sm) > 2 else
                              "the stat changes were inverted")
                 else:
-                    prose = (f"{_poke_name(sm[2])}'s boosts were cleared"
+                    prose = (f"{name_of(sm[2])}'s boosts were cleared"
                              if len(sm) > 2 else "the boosts were cleared")
                 out.append(Event("boosts_cleared", prose, notable=True,
                                  side=side_of(sm[2]) if len(sm) > 2 else None))
@@ -529,22 +541,23 @@ class ProtocolScanner:
                     flush()
                     out.append(Event(
                         "volatile_start",
-                        entry[0].format(n=_poke_name(sm[2])),
+                        entry[0].format(n=name_of(sm[2])),
                         side=side_of(sm[2]), notable=entry[1],
-                        data={"mon": _poke_name(sm[2]), "volatile": key}))
+                        data={"mon": name_of(sm[2]), "volatile": key}))
             elif t == "-end" and len(sm) > 3:
                 entry = _VOL_END.get(_cond_name(sm[3]).lower())
                 if entry:
                     flush()
                     out.append(Event(
                         "volatile_end",
-                        entry[0].format(n=_poke_name(sm[2])),
+                        entry[0].format(n=name_of(sm[2])),
                         side=side_of(sm[2]), notable=entry[1],
-                        data={"mon": _poke_name(sm[2]),
+                        data={"mon": name_of(sm[2]),
                               "volatile": _cond_name(sm[3]).lower()}))
             elif t == "replace" and len(sm) > 2:
                 flush()
-                species = sm[3].split(",")[0] if len(sm) > 3 else _poke_name(sm[2])
+                species = sm[3].split(",")[0] if len(sm) > 3 else name_of(sm[2])
+                self._species[sm[2].split(":")[0]] = species
                 out.append(Event(
                     "illusion_reveal",
                     f"the Illusion drops - it was {species} all along",
@@ -554,16 +567,16 @@ class ProtocolScanner:
                 flush()
                 out.append(Event(
                     "transform",
-                    f"{_poke_name(sm[2])} transformed into {_poke_name(sm[3])}",
+                    f"{name_of(sm[2])} transformed into {name_of(sm[3])}",
                     side=side_of(sm[2]), notable=True,
-                    data={"mon": _poke_name(sm[2]),
-                          "into": _poke_name(sm[3])}))
+                    data={"mon": name_of(sm[2]),
+                          "into": name_of(sm[3])}))
             elif t == "-prepare" and len(sm) > 3:
                 flush()
                 out.append(Event(
-                    "charging", f"{_poke_name(sm[2])} is charging up {sm[3]}",
+                    "charging", f"{name_of(sm[2])} is charging up {sm[3]}",
                     side=side_of(sm[2]),
-                    data={"mon": _poke_name(sm[2]), "move": sm[3]}))
+                    data={"mon": name_of(sm[2]), "move": sm[3]}))
             elif t == "-sidestart" and len(sm) > 3:
                 flush()
                 poss = side_poss(sm[2])
@@ -685,9 +698,11 @@ def classify(ev: Event, stats_fn=None) -> Beat | None:
     if t == "status_applied":
         status = ev.data.get("status")
         cause = (ev.data.get("cause") or "")
-        if status == "slp" and cause == "Yawn":
-            # negotiated sleep: the afflicted side chose to stay in — analyst
-            # owns it; a gremlin shock-react here is a gold-set FAILURE
+        if status == "slp" and cause in ("Yawn", "Rest"):
+            # deliberate sleep — Yawn's negotiated stay-in, or Rest buying
+            # recovery with tempo (real replays showed Rest routing to the
+            # gremlin's assassination register: wrong frame, it's a choice).
+            # Analyst owns it; a gremlin shock-react here is a gold FAILURE
             return make_beat("status", ev.prose, persona="analyst",
                              priority="normal", register="negotiated",
                              **ev.data)
@@ -825,9 +840,8 @@ class Director:
                 or ctx.elapsed >= self.min_interval):
             return Decision(None, [], True)
 
-        beats = [b for b in
-                 (classify(ev, self.stats_fn) for ev in self._pending)
-                 if b is not None]
+        pairs = [(ev, classify(ev, self.stats_fn)) for ev in self._pending]
+        beats = [b for _, b in pairs if b is not None]
         if esc_prose:
             beats.append(make_beat("status_recovery", esc_prose,
                                    priority="filler",
@@ -847,7 +861,19 @@ class Director:
         # all read this shape) ----
         parts = [f"[BATTLE T{ctx.turn}]"]
         if self._pending or esc_prose:
-            hl = [ev.prose for ev in self._pending if ev.prose][-4:]
+            # crowded turns overflow the 4-line exchange window; keep the
+            # HIGHEST-priority events' prose (chronological order preserved)
+            # rather than the most recent — a blind last-4 dropped a Tera
+            # line in favor of "raised its Speed" (caught by replay pinning)
+            cand = [(i, ev, b) for i, (ev, b) in enumerate(pairs)
+                    if ev.prose]
+            if len(cand) > 4:
+                ranked = sorted(
+                    cand, key=lambda t: (
+                        -(_PRIORITY_RANK.get(t[2].priority, 0)
+                          if t[2] else 0), -t[0]))
+                cand = sorted(ranked[:4], key=lambda t: t[0])
+            hl = [ev.prose for _, ev, _ in cand]
             if esc_prose:
                 hl.append(esc_prose)
             if hl:

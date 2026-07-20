@@ -220,6 +220,28 @@ def test_affliction_escalation_counter():
     assert "STILL" not in (d3.text or "")
 
 
+def test_crowded_turn_keeps_high_priority_prose():
+    """A Tera (interrupt) on a 5+-event turn must survive the 4-line
+    exchange window — the blind last-4 dropped it (replay-pinning catch)."""
+    d = Director()
+    d.observe([
+        Event("tera", "Great Tusk Terastallized into a Steel type",
+              side="them", notable=True, data={"tera_type": "Steel"}),
+        Event("move_hit", "Kyurem's Freeze-Dry landed not very effective",
+              side="us", data={}),
+        Event("move_hit", "Great Tusk's Rapid Spin landed a critical hit",
+              side="us", notable=True, data={"crit": True}),
+        Event("volatile_end", "Kyurem's Substitute broke", side="us",
+              notable=True, data={}),
+        Event("boost", "Great Tusk raised its Speed", side="them",
+              notable=True, data={}),
+    ])
+    dec = d.decide(_ctx(turn=10, value=0.5, elapsed=30.0))
+    assert "Terastallized into a Steel type" in dec.text
+    # chronological order preserved among the kept lines
+    assert dec.text.index("Terastallized") < dec.text.index("critical hit")
+
+
 def test_match_framing_texts():
     d = Director()
     start = d.match_start("FPAiri", ["Gliscor", "Darkrai"],
