@@ -444,3 +444,30 @@
     turn: 10
     role: p1
     ctx: {value: 0.65}
+
+# --- grudge ledger: FRACTURE cites only REAL, recorded vendettas ----------
+# (gc-0027-family in the drafts: "persistent grudges with statistical
+# backing"). Caster-level only — the grudge is an injected fact, not a
+# director beat. Inline `grudges` + `opp` set up the injection.
+
+- id: gc-grudge-hit
+  beat: ko
+  persona: gremlin
+  priority: interrupt
+  register: grief
+  must_mention: ["Darkrai"]      # she names the recorded victim, not just rage
+  forbid: [statistics_or_citations]
+  fixture:
+    role: p1
+    opp: Kingambit
+    grudges:
+      kingambit: {name: Kingambit, kos: 4,
+                  victims: {Darkrai: 3, Gliscor: 1}, moves: {Sucker Punch: 3}}
+    batches:
+      - - ["", "move", "p2a: Kingambit", "Sucker Punch", "p1a: Darkrai"]
+        - ["", "-damage", "p1a: Darkrai", "0 fnt"]
+        - ["", "faint", "p1a: Darkrai"]
+    ctx:
+      - {turn: 14, value: 0.45, elapsed: 30.0, me_name: Gholdengo, me_hp: 60,
+         opp_name: Kingambit, opp_hp: 100,
+         ours_fainted: [Darkrai]}

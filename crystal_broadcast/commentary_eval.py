@@ -271,8 +271,16 @@ def run_caster(entry: dict, final, upstream: str, model: str) -> list[str]:
     fx = entry["fixture"]
     turn = (fx.get("turn") if "replay" in fx
             else fx["ctx"][-1].get("turn"))
+    # grudge entries: load an inline ledger and put the opponent active on
+    # the HUD so the caster's FRACTURE-only grudge injection fires
+    if fx.get("grudges"):
+        from showdown.grudge_ledger import GrudgeLedger
+        caster.grudges = GrudgeLedger(fx["grudges"])
+    hud = {"turn": turn}
+    if fx.get("opp"):
+        hud["them"] = fx["opp"]
     item = {"text": final.text, "beats": [asdict(b) for b in final.beats],
-            "hud": {"turn": turn}}
+            "hud": hud}
     asyncio.run(caster.speak(item))
     misses = []
     by = {p: ln for p, ln in spoken}

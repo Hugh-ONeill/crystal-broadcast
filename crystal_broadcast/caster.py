@@ -42,6 +42,7 @@ import websockets
 import re
 
 from showdown.airi_bridge import _sanitize, _unwrap
+from showdown.grudge_ledger import GrudgeLedger
 
 # the model mimics the transcript format and prefixes its own line with a
 # speaker label (sometimes stacked: "PRISM: PRISM: ..."); strip them all
@@ -51,6 +52,7 @@ PERSONA_DIR = Path(__file__).parent / "personas"
 DEFAULT_PORT = 8131
 DEFAULT_UPSTREAM = "http://127.0.0.1:11435"
 DEFAULT_MODEL = "gemma4:26b-a4b-it-q4_K_M"
+DEFAULT_GRUDGES = Path(__file__).parent / "grudges.json"
 
 # generation knobs per persona: FRACTURE runs hot and short, PRISM cool
 # and a touch longer. frequency_penalty pushes against echoing the duo
@@ -117,11 +119,13 @@ def _speakers(beats: list[dict], text: str) -> list[str]:
 
 
 class Caster:
-    def __init__(self, upstream: str, model: str):
+    def __init__(self, upstream: str, model: str,
+                 grudge_path: str | None = None):
         self.upstream = upstream
         self.model = model
         self.prompts = {p: (PERSONA_DIR / f).read_text()
                         for p, f in _PERSONA_FILE.items()}
+        self.grudges = GrudgeLedger.load(grudge_path)
         self.transcript: deque = deque(maxlen=12)
         self.clients: set = set()
         # skip-don't-queue: newest unspoken turn beat wins; framing beats
@@ -215,6 +219,17 @@ class Caster:
         if nudge:
             direction += f" {nudge}"
         user = ""
+        # FRACTURE's Book of Grudges: inject the real vendetta for the mon
+        # on the field so she can cite it. Only a recorded grudge appears
+        # here, which is the whole point — her paranoia has to be earned,
+        # never invented. Injected as available context, not a command:
+        # she references it when it fits the moment, not every line.
+        if persona == "FRACTURE":
+            them = (item.get("hud") or {}).get("them")
+            grudge = self.grudges.grudge_for(them)
+            if grudge:
+                user += (f"{grudge} Reference it only if it fits this "
+                         f"moment; never invent a grudge not stated here.\n\n")
         if transcript:
             user += f"Broadcast so far:\n{transcript}\n\n"
         user += f"New beat from the director:\n{item['text']}\n({direction})"
@@ -302,9 +317,15 @@ async def main():
     ap.add_argument("--upstream", default=DEFAULT_UPSTREAM,
                     help="OpenAI-compatible endpoint (the no-think proxy)")
     ap.add_argument("--model", default=DEFAULT_MODEL)
+    ap.add_argument("--grudges", default=str(DEFAULT_GRUDGES),
+                    help="grudge-ledger JSON (FRACTURE's Book of Grudges); "
+                         "absent = no grudges, graceful")
     args = ap.parse_args()
 
-    caster = Caster(args.upstream, args.model)
+    caster = Caster(args.upstream, args.model, grudge_path=args.grudges)
+    if caster.grudges.ledger:
+        print(f"caster: loaded {len(caster.grudges.ledger)} grudges "
+              f"from {args.grudges}", flush=True)
     async with websockets.serve(caster.handle, "127.0.0.1", args.port):
         print(f"caster: duo live on ws://127.0.0.1:{args.port} "
               f"(model {args.model} via {args.upstream})", flush=True)
