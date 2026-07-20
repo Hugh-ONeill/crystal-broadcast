@@ -288,3 +288,159 @@
          opp_name: Dondozo, opp_hp: 100}
       - {turn: 31, value: 0.505, elapsed: 6.0, me_name: Toxapex, me_hp: 100,
          opp_name: Dondozo, opp_hp: 100}
+
+# ===========================================================================
+# Replay-pinned entries (-r suffix): the same draft ids driven by REAL
+# ladder games in gold/replays/ instead of synthetic fixtures. The scanner
+# sees the whole game up to `turn` (HP/species state); the director
+# observes only the target turn; ctx (actives/hp/status/fainted) is
+# auto-derived from the protocol — entries hand-specify only value/elapsed
+# where the default 0.5/30.0 doesn't fit.
+# ===========================================================================
+
+- id: gc-0003-r
+  beat: status
+  persona: gremlin
+  priority: interrupt
+  register: despair
+  must_mention: ["Tinkaton", "burn"]
+  forbid: [statistics_or_citations]
+  fixture: {replay: gen9ou-2597586150.json, turn: 9, role: p1}
+
+- id: gc-0004-r
+  beat: status
+  persona: gremlin
+  priority: interrupt
+  register: celebration
+  must_mention: ["Landorus", "burn"]
+  forbid: [statistics_or_citations]
+  fixture: {replay: gen9ou-2597580197.json, turn: 3, role: p1}
+
+- id: gc-0005-r
+  beat: status
+  persona: analyst
+  priority: normal
+  register: wasted-burn
+  must_mention: ["Gholdengo", "burn"]
+  fixture: {replay: gen9ou-2597586349.json, turn: 14, role: p1}
+
+- id: gc-0007-r
+  beat: status
+  persona: gremlin
+  priority: interrupt
+  register: despair
+  must_mention: ["Iron Moth", "paralyzed|para"]
+  forbid: [statistics_or_citations]
+  fixture: {replay: gen9ou-2597585497.json, turn: 3, role: p1}
+
+- id: gc-0011-r
+  beat: status
+  persona: analyst
+  priority: normal
+  register: negotiated
+  must_mention: ["Ting-Lu", "Rest|sleep"]
+  fixture: {replay: gen9ou-2597616118.json, turn: 10, role: p1}
+
+- id: gc-0012-r
+  beat: status
+  persona: gremlin
+  priority: interrupt
+  register: persecution
+  must_mention: ["Blissey", "froze|frozen"]
+  forbid: [statistics_or_citations]
+  fixture: {replay: gen9ou-2597578870.json, turn: 4, role: p2}
+
+- id: gc-0013-r
+  beat: status_recovery
+  persona: gremlin
+  priority: interrupt
+  register: bragging
+  must_mention: ["Blissey", "thaw"]
+  forbid: [statistics_or_citations]
+  fixture: {replay: gen9ou-2597578870.json, turn: 6, role: p2}
+
+- id: gc-0016-r
+  beat: hazards
+  persona: gremlin
+  priority: interrupt
+  register: sunk-cost-outrage
+  must_mention: ["Spikes|Stealth Rock", "Defog|cleared"]
+  forbid: [statistics_or_citations]
+  fixture: {replay: gen9ou-2597578620.json, turn: 7, role: p1}
+
+- id: gc-0017-r
+  beat: hazards
+  persona: both
+  priority: interrupt
+  register: heist
+  handoff: [gremlin, analyst]
+  must_mention: ["Cinderace", "court change|swap"]
+  fixture: {replay: gen9ou-2597649285.json, turn: 7, role: p1}
+
+- id: gc-0021-r
+  beat: crit_luck
+  persona: gremlin
+  priority: interrupt
+  register: persecution
+  must_mention: ["Kyurem|Freeze-Dry", "crit"]
+  forbid: [statistics_or_citations]
+  fixture: {replay: gen9ou-2597578870.json, turn: 5, role: p2}
+
+- id: gc-0022-r
+  beat: crit_luck
+  persona: gremlin
+  priority: interrupt
+  register: delight
+  must_mention: ["Kyurem|Freeze-Dry", "crit"]
+  forbid: [statistics_or_citations]
+  fixture: {replay: gen9ou-2597578870.json, turn: 5, role: p1}
+
+- id: gc-0024-r
+  beat: field_state
+  persona: either
+  must_mention: ["Reflect"]
+  fixture: {replay: gen9ou-2597585497.json, turn: 8, role: p1}
+
+- id: gc-0026-r
+  beat: tera
+  persona: analyst
+  priority: interrupt
+  must_mention: ["Great Tusk", "Steel"]
+  fixture: {replay: gen9ou-2597578870.json, turn: 10, role: p1}
+
+- id: gc-0036-r
+  beat: item_denial
+  persona: either
+  priority: interrupt
+  must_mention: ["Kyurem", "Leftovers|knocked"]
+  fixture: {replay: gen9ou-2597581372.json, turn: 8, role: p1}
+
+- id: gc-0040-r
+  beat: lockdown
+  persona: either
+  priority: interrupt
+  must_mention: ["Ting-Lu", "Taunt"]
+  fixture: {replay: gen9ou-2597589535.json, turn: 5, role: p1}
+
+- id: gc-0045-r
+  beat: ko
+  persona: gremlin
+  priority: interrupt
+  register: grief
+  must_mention: ["Dragapult", "Sucker Punch"]
+  forbid: [statistics_or_citations]
+  fixture: {replay: gen9ou-2597586150.json, turn: 7, role: p1}
+
+- id: gc-0032-r
+  beat: desk_contradiction
+  persona: analyst
+  priority: interrupt
+  # the lean can be voiced as dismissal of the deficit ("the search isn't
+  # looking at quantity... force the issue") — pin the stance, not the verb
+  must_mention: ["down|trail|deficit|bodies",
+                 "sees|path|favors|edge|upbeat|force|isn't|still|quantity"]
+  fixture:
+    replay: gen9ou-2597586150.json
+    turn: 10
+    role: p1
+    ctx: {value: 0.65}

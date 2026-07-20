@@ -93,15 +93,137 @@ def _ctx(raw: dict) -> TurnContext:
     return TurnContext(**kw)
 
 
+# --- replay-pinned fixtures ------------------------------------------------
+
+# pinned replays are COPIED into gold/replays/ so the gold set stays
+# self-contained and versioned (showdown/replays/ is untracked bulk)
+REPLAY_DIR = Path(__file__).parent / "gold" / "replays"
+
+
+def load_replay_blocks(path: Path) -> list[tuple[int, list[list[str]]]]:
+    """Replay JSON -> [(turn, batch)] where batch is one turn's protocol
+    lines in scanner shape. Lines before |turn|1 are turn 0 (leads)."""
+    import json as _json
+    log = _json.loads(path.read_text())["log"]
+    blocks: list[tuple[int, list[list[str]]]] = [(0, [])]
+    for line in log.split("\n"):
+        sm = line.split("|")
+        if len(sm) > 1 and sm[1] == "turn":
+            blocks.append((int(sm[2]), []))
+        else:
+            blocks[-1][1].append(sm)
+    return blocks
+
+
+def _hp_pct(token: str) -> int | None:
+    """'64/100', '64/100y' (bar-color suffix), '0 fnt' -> percent."""
+    head = token.split(" ")[0]
+    if head in ("0", "0.0"):
+        return 0
+    if "/" not in head:
+        return None
+    num, den = head.split("/")
+    den = re.sub(r"[^0-9]", "", den)
+    if not (num.isdigit() and den and int(den)):
+        return None
+    return round(100 * int(num) / int(den))
+
+
+class ReplayState:
+    """Track the ctx-relevant board state (actives, hp%, status, fainted)
+    from raw protocol so replay entries only hand-specify the desk value.
+    HP Percentage Mod makes hp fractions exact."""
+
+    def __init__(self, role: str):
+        self.role = role
+        self.active: dict[str, str] = {}
+        self.hp: dict[str, int] = {}
+        self.status: dict[str, str | None] = {}
+        self.fainted: dict[str, set] = {"p1": set(), "p2": set()}
+
+    def feed(self, batch: list[list[str]]):
+        for sm in batch:
+            if len(sm) < 3:
+                continue
+            t, pos = sm[1], sm[2].split(":")[0]
+            side = pos[:2]
+            if t in ("switch", "drag", "replace") and len(sm) > 3:
+                self.active[side] = sm[3].split(",")[0]
+                self.status[side] = None
+                if len(sm) > 4:
+                    pct = _hp_pct(sm[4])
+                    if pct is not None:
+                        self.hp[side] = pct
+                    tail = sm[4].split(" ")
+                    if len(tail) > 1 and tail[1] != "fnt":
+                        self.status[side] = tail[1]
+            elif t in ("-damage", "-heal", "-sethp") and len(sm) > 3:
+                pct = _hp_pct(sm[3])
+                if pct is not None:
+                    self.hp[side] = pct
+            elif t == "-status" and len(sm) > 3:
+                self.status[side] = sm[3]
+            elif t == "-curestatus" and len(sm) > 3:
+                self.status[side] = None
+            elif t == "faint":
+                name = sm[2].split(": ", 1)[-1]
+                self.fainted[side].add(name)
+
+    def ctx_fields(self, turn: int) -> dict:
+        us, them = self.role, ("p2" if self.role == "p1" else "p1")
+        return {
+            "turn": turn,
+            "me_name": self.active.get(us),
+            "me_hp": self.hp.get(us),
+            "me_status": self.status.get(us),
+            "opp_name": self.active.get(them),
+            "opp_hp": self.hp.get(them),
+            "opp_status": self.status.get(them),
+            "ours_fainted": frozenset(self.fainted[us]),
+            "theirs_fainted": frozenset(self.fainted[them]),
+        }
+
+
+def run_replay_fixture(entry: dict):
+    """Feed a pinned replay moment through fresh scanner+director. The
+    scanner sees the whole game up to the target turn (HP/weather state);
+    the director observes only [observe_from..turn]; ctx is auto-derived
+    from the protocol with entry overrides (value/elapsed at minimum)."""
+    fx = entry["fixture"]
+    target = fx["turn"]
+    observe_from = fx.get("observe_from", target)
+    role = fx.get("role", "p1")
+    scanner = ProtocolScanner()
+    director = Director(stats_fn=DATA.stats)
+    state = ReplayState(role)
+    for turn, batch in load_replay_blocks(REPLAY_DIR / fx["replay"]):
+        if turn > target:
+            break
+        events = scanner.scan(batch, role)
+        state.feed(batch)
+        if observe_from <= turn <= target:
+            director.observe(events)
+    ctx_kw = state.ctx_fields(target)
+    ctx_kw.update({"value": 0.5, "elapsed": 30.0})
+    ctx_kw.update(fx.get("ctx", {}))
+    for key in ("ours_fainted", "theirs_fainted"):
+        if isinstance(ctx_kw.get(key), list):
+            ctx_kw[key] = frozenset(ctx_kw[key])
+    return [director.decide(TurnContext(**ctx_kw))]
+
+
 def run_director(entry: dict) -> tuple[list, object, list[str]]:
     """Feed the fixture through fresh scanner+director; return (decisions,
     final decision, misses)."""
     fx = entry["fixture"]
-    scanner = ProtocolScanner()
-    director = Director(stats_fn=DATA.stats)
-    for batch in fx.get("batches", []):
-        director.observe(scanner.scan(batch, fx.get("role")))
-    decisions = [director.decide(_ctx(c)) for c in fx["ctx"]]
+    if "replay" in fx:
+        decisions = run_replay_fixture(entry)
+    else:
+        scanner = ProtocolScanner()
+        director = Director(stats_fn=DATA.stats)
+        for batch in fx.get("batches", []):
+            director.observe(scanner.scan(batch, fx.get("role")))
+        decisions = [director.decide(_ctx(c)) for c in fx["ctx"]]
     final = decisions[-1]
     misses = []
 
@@ -146,8 +268,11 @@ def run_caster(entry: dict, final, upstream: str, model: str) -> list[str]:
         spoken.append((persona, line))
 
     caster.publish = collect
+    fx = entry["fixture"]
+    turn = (fx.get("turn") if "replay" in fx
+            else fx["ctx"][-1].get("turn"))
     item = {"text": final.text, "beats": [asdict(b) for b in final.beats],
-            "hud": {"turn": entry["fixture"]["ctx"][-1].get("turn")}}
+            "hud": {"turn": turn}}
     asyncio.run(caster.speak(item))
     misses = []
     by = {p: ln for p, ln in spoken}
