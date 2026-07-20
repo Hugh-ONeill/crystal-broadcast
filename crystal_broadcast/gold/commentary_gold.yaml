@@ -510,3 +510,21 @@
     ctx:
       - {turn: 12, value: 0.4, elapsed: 30.0, me_name: Corviknight, me_hp: 55,
          opp_name: Kingambit, opp_hp: 90}
+
+- id: gc-0020-r
+  beat: set_reveal
+  persona: analyst          # negative-evidence read: gremlin has nothing here
+  priority: interrupt
+  must_mention: ["Corviknight", "Boots|boots"]
+  forbid: [ungrounded_entity]
+  fixture:
+    role: p1
+    events:
+      - type: belief_delta
+        prose: "set inference confirms Corviknight's Heavy-Duty Boots: it walked in over the Stealth Rock for free"
+        side: them
+        notable: true
+        data: {species: corviknight, item: heavydutyboots}
+    ctx:
+      - {turn: 9, value: 0.5, elapsed: 30.0, me_name: Gholdengo, me_hp: 70,
+         opp_name: Corviknight, opp_hp: 100}

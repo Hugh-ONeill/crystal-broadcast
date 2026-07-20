@@ -683,9 +683,13 @@ def classify(ev: Event, stats_fn=None) -> Beat | None:
     if t == "belief_delta":
         # set-inference confirmation ("that's a Scarf") — not a protocol
         # event; the live player injects it when the search adopts a new
-        # inferred item. Either voice (gc-0018/19): analyst cites the
-        # evidence chain, gremlin claims they called it.
-        return make_beat("set_reveal", ev.prose, persona="either",
+        # inferred item. Speed/damage items (gc-0018/19) are either voice
+        # (analyst cites the chain, gremlin claims the call); the Boots
+        # negative-evidence read (gc-0020, the dog that didn't bark) is
+        # analyst-only — the gremlin has nothing to shout about an absence.
+        boots = ev.data.get("item") == "heavydutyboots"
+        return make_beat("set_reveal", ev.prose,
+                         persona="analyst" if boots else "either",
                          priority="interrupt", register="set-reveal",
                          **ev.data)
     if t == "ko":
