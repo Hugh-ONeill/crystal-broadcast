@@ -308,9 +308,15 @@ class Caster:
         # PRISM only — FRACTURE is no-citations by contract.
         if persona == "PRISM" and item.get("_facts"):
             lines = "\n".join(f"- {n}: {f}" for n, f in item["_facts"])
-            user += ("GROUNDED FACTS (authoritative — do not state anything "
-                     "that contradicts these; you may cite them):\n"
-                     f"{lines}\n\n")
+            user += ("GROUNDED FACTS (the GENERAL behavior of these "
+                     "mechanics — don't contradict them, and you may cite "
+                     "them). The beat is authoritative for what ACTUALLY "
+                     "happened this turn: a move the beat says had 'no "
+                     "effect' or was immune did nothing regardless of its "
+                     "general effect (a spinblocked Rapid Spin leaves the "
+                     "hazards up). Do NOT guess WHY it had no effect or name "
+                     "an ability the beat didn't — just report that it did "
+                     f"nothing:\n{lines}\n\n")
         # FRACTURE's Book of Grudges: inject the real vendetta for the mon
         # on the field so she can cite it. Only a recorded grudge appears
         # here, which is the whole point — her paranoia has to be earned,
