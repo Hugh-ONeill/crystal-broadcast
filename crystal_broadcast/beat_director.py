@@ -143,6 +143,18 @@ def _from_cause(events) -> str | None:
     return None
 
 
+def _status_cause(events) -> str | None:
+    """The source of a status: a '[from] move/item/ability: X'. Items matter
+    for status specifically — a Toxic Orb / Flame Orb self-inflicts, and
+    without naming it the caster grabs a nearby move for the cause (measured
+    live: 'the Poison from Psychic Noise' when it was really Toxic Orb)."""
+    for e in events:
+        for pre in ("[from] move:", "[from] item:", "[from] ability:"):
+            if e.startswith(pre):
+                return e.split(":", 1)[1].strip()
+    return None
+
+
 def _hp_frac(hp: str) -> float | None:
     """'45/100' / '0 fnt' / '45/100 brn' -> fraction, or None."""
     try:
@@ -421,12 +433,13 @@ class ProtocolScanner:
                 tmpl = _STATUS_INFLICT.get(sm[3])
                 if tmpl:
                     flush()  # emit the causing move first, then its effect
-                    cause = _from_move(sm[4:])
+                    cause = _status_cause(sm[4:])
                     prose = tmpl.format(n=name_of(sm[2]))
                     if cause:
-                        # name the cause or downstream commentary invents
-                        # one (a caster said "Spore" on a beat that only
-                        # read "put Gliscor to sleep")
+                        # name the cause (move OR item like Toxic Orb) or
+                        # downstream commentary invents one (a caster said
+                        # "Spore" on a beat that only read "put to sleep",
+                        # and "the poison from Psychic Noise" for a Toxic Orb)
                         prose = f"{cause} {prose}"
                     out.append(Event(
                         "status_applied", prose,
