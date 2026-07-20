@@ -254,6 +254,16 @@ class Caster:
             out = json.load(resp)
         return out["choices"][0]["message"]["content"]
 
+    @staticmethod
+    def _fabricated_crit(line: str, item: dict) -> bool:
+        """True when the spoken line claims a crit the beat never reported —
+        a facts-of-record violation (a super-effective/heavy hit narrated as
+        a 'crit'). The beat text carries 'critical hit' only when one really
+        landed, so a crit word without it in the beat is invented."""
+        if not re.search(r"\bcrit(?:ical|s)?\b", line, re.I):
+            return False
+        return "critical" not in (item.get("text") or "").lower()
+
     def _same_opener(self, persona: str, line: str, words: int = 4) -> bool:
         """True when `line` opens with the same first words as this
         persona's most recent line — the measured mode-collapse signature
@@ -277,6 +287,22 @@ class Caster:
                       flush=True)
                 continue
             line = _sanitize(_SELF_LABEL.sub("", raw.strip()))
+            # facts-of-record guard: a fabricated crit is the common one
+            # (a super-effective/heavy hit narrated as a "crit" that never
+            # happened). If the line claims a crit the beat never stated,
+            # regenerate once forbidding it.
+            if line and self._fabricated_crit(line, item):
+                try:
+                    raw = await asyncio.to_thread(
+                        self._generate_sync, persona, item,
+                        "Do NOT call this a critical hit or crit — nothing "
+                        "in the beat says a critical hit happened. State only "
+                        "what the beat reports.")
+                    retry = _sanitize(_SELF_LABEL.sub("", raw.strip()))
+                    if retry and not self._fabricated_crit(retry, item):
+                        line = retry
+                except Exception:
+                    pass
             # opener-repetition guard: one hotter retry with an explicit
             # nudge; keep whatever the retry gives (never loop)
             if line and self._same_opener(persona, line):

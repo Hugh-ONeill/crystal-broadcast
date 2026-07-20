@@ -163,6 +163,36 @@ def test_prism_angle_rotates_by_turn():
     assert "Angle:" not in reg[1]["content"]
 
 
+def test_fabricated_crit_detection():
+    c = Caster("http://unused", "test-model")
+    se_beat = {"text": "[BATTLE T14] Bitter Blade knocked out Gholdengo "
+                       "with super effective. X vs Y."}
+    crit_beat = {"text": "[BATTLE T5] Iron Head landed a critical hit."}
+    # crit claimed, beat has no 'critical' -> fabrication
+    assert c._fabricated_crit("A SUPER EFFECTIVE CRIT deleted it!", se_beat)
+    # crit claimed, beat reports a critical -> fine
+    assert not c._fabricated_crit("A CRIT! Rigged!", crit_beat)
+    # no crit claim -> fine
+    assert not c._fabricated_crit("That was super effective!", se_beat)
+
+
+def test_fabricated_crit_triggers_one_regen():
+    c = Caster("http://unused", "test-model")
+    calls = []
+
+    def fake_gen(persona, item, nudge=None, temp_boost=0.0):
+        calls.append(nudge)
+        return ("It was a brutal CRIT!" if nudge is None
+                else "It was a brutal super-effective hit!")
+
+    c._generate_sync = fake_gen
+    item = {"text": "[BATTLE T3] a super effective hit landed. X vs Y.",
+            "beats": [], "hud": None}
+    asyncio.run(c.speak(item))
+    assert len(calls) == 2 and calls[1] is not None          # regenerated
+    assert "crit" not in c.transcript[-1][1].lower()
+
+
 def test_skip_dont_queue():
     """A newer turn beat replaces an unspoken older one; framing beats
     (MATCH START / RESULT) all survive."""
