@@ -242,6 +242,49 @@ def test_crowded_turn_keeps_high_priority_prose():
     assert dec.text.index("Terastallized") < dec.text.index("critical hit")
 
 
+def test_status_synergy_is_a_boon_not_grief():
+    # our Poison Heal Gliscor getting Toxic'd is the plan working, not a
+    # wound — analyst boon, never gremlin despair (user-caught live)
+    def af(name, side):
+        return {"gliscor": {"poisonheal"}}.get(name.lower(), set())
+    ev = Event("status_applied", "badly poisoned Gliscor", side="us",
+               data={"mon": "Gliscor", "status": "tox"})
+    b = classify(ev, None, af)
+    assert b.persona == "analyst" and b.register == "status-boon"
+    assert "Poison Heal" in b.prose
+
+
+def test_status_synergy_burn_on_guts():
+    def af(name, side):
+        return {"ursaluna": {"guts"}}.get(name.lower(), set())
+    # burn on THEIR Guts attacker backfires — we helped them
+    ev = Event("status_applied", "burned Ursaluna", side="them",
+               data={"mon": "Ursaluna", "status": "brn"})
+    b = classify(ev, None, af)
+    assert b.register == "status-backfire" and "Guts" in b.prose
+
+
+def test_status_synergy_hedges_when_ability_uncertain():
+    def af(name, side):
+        # a species that CAN but might not run the synergy ability
+        return {"breloom": {"poisonheal", "technician", "effectspore"}}.get(
+            name.lower(), set())
+    ev = Event("status_applied", "badly poisoned Breloom", side="us",
+               data={"mon": "Breloom", "status": "tox"})
+    b = classify(ev, None, af)
+    assert b.register == "status-boon-hedge"
+
+
+def test_status_without_synergy_stays_despair():
+    def af(name, side):
+        return {"corviknight": {"pressure"}}.get(name.lower(), set())
+    ev = Event("status_applied", "burned Corviknight", side="us",
+               data={"mon": "Corviknight", "status": "brn"})
+    assert classify(ev, None, af).register == "despair"
+    # and with no ability_fn at all, behaviour is unchanged
+    assert classify(ev, None, None).register == "despair"
+
+
 def test_match_framing_texts():
     d = Director()
     start = d.match_start("FPAiri", ["Gliscor", "Darkrai"],

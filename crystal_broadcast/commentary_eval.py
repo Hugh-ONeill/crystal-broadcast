@@ -221,7 +221,14 @@ def run_director(entry: dict) -> tuple[list, object, list[str]]:
         decisions = run_replay_fixture(entry)
     else:
         scanner = ProtocolScanner()
-        director = Director(stats_fn=DATA.stats)
+        # optional inline ability map for status-synergy entries:
+        # {mon_display: [ability, ...]}; the fn ignores side (test fixtures
+        # state the mon's abilities directly)
+        amap = {k.lower(): {_norm(a) for a in v}
+                for k, v in fx.get("abilities", {}).items()}
+        ability_fn = ((lambda name, side: amap.get(name.lower(), set()))
+                      if amap else None)
+        director = Director(stats_fn=DATA.stats, ability_fn=ability_fn)
         for batch in fx.get("batches", []):
             director.observe(scanner.scan(batch, fx.get("role")))
         # injected (non-protocol) events: belief deltas, notes — the player
@@ -315,6 +322,18 @@ def run_caster(entry: dict, final, upstream: str, model: str) -> list[str]:
 
     allowed_text = (final.text or "") + " " + " ".join(
         entry.get("allowed_entities", []))
+    # status words ground the moves that inflict them: a beat that says
+    # "badly poisoned" grounds "Toxic", "burned" grounds "Will-O-Wisp",
+    # etc. — naming the status move for a status on the board is not a
+    # hallucination (it's the same event the caster is reacting to)
+    _btl = allowed_text.lower()
+    for cue, moves in (("poison", "toxic"), ("burn", "will-o-wisp"),
+                       ("paralyz", "thunder wave glare"),
+                       ("asleep", "spore sleep powder hypnosis yawn"),
+                       ("sleep", "spore sleep powder hypnosis yawn"),
+                       ("froze", "ice beam"), ("frozen", "ice beam")):
+        if cue in _btl:
+            allowed_text += " " + moves
     for forbid in entry.get("forbid", []):
         if forbid == "statistics_or_citations":
             for who, ln in spoken:

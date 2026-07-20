@@ -528,3 +528,24 @@
     ctx:
       - {turn: 9, value: 0.5, elapsed: 30.0, me_name: Gholdengo, me_hp: 70,
          opp_name: Corviknight, opp_hp: 100}
+
+# --- status synergy: a status the mon's ability WANTS is a boon (user-caught
+#     live: Fracture grieved over Toxic on a Poison Heal Gliscor) ------------
+
+- id: gc-status-synergy
+  beat: status
+  persona: analyst
+  priority: normal
+  register: status-boon
+  # names the mon + reads the status as a BOON (not the exact ability word —
+  # "recovery resource"/"heals it"/"feeds" all pass; the point is it's not grief)
+  must_mention: ["Gliscor", "poison heal|recover|heal|feeds|helps|boon|advantage"]
+  forbid: [statistics_or_citations]
+  fixture:
+    role: p1
+    abilities: {Gliscor: [poisonheal]}
+    batches:
+      - - ["", "-status", "p1a: Gliscor", "tox", "[from] item: Toxic Orb"]
+    ctx:
+      - {turn: 6, value: 0.5, elapsed: 30.0, me_name: Gliscor, me_hp: 80,
+         opp_name: Great Tusk, opp_hp: 100}

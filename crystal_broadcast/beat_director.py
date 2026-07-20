@@ -216,6 +216,26 @@ _CANT = {
     "recharge": "{n} had to recharge",
 }
 
+# ability -> the statuses it turns into an ADVANTAGE. A status the afflicted
+# mon's ability wants is not a wound: Poison Heal heals from poison; Guts /
+# Quick Feet / Marvel Scale / Flare Boost / Toxic Boost convert it into a
+# stat boost (and Guts even ignores burn's Attack drop). Sleep and freeze
+# are excluded even for the boost abilities — an immobilized mon can't cash
+# the boost in.
+_STATUS_SYNERGY = {
+    "poisonheal": {"psn", "tox"},
+    "guts": {"brn", "psn", "tox", "par"},
+    "quickfeet": {"brn", "psn", "tox", "par"},
+    "marvelscale": {"brn", "psn", "tox", "par"},
+    "flareboost": {"brn"},
+    "toxicboost": {"psn", "tox"},
+}
+_SYNERGY_NAME = {
+    "poisonheal": "Poison Heal", "guts": "Guts", "quickfeet": "Quick Feet",
+    "marvelscale": "Marvel Scale", "flareboost": "Flare Boost",
+    "toxicboost": "Toxic Boost",
+}
+
 _HAZARDS = {"stealth rock", "spikes", "toxic spikes", "sticky web",
             "g-max steelsurge"}
 _SCREENS = {"reflect", "light screen", "aurora veil"}
@@ -675,10 +695,12 @@ class ProtocolScanner:
 _LUCK_REGISTERS = {"us": "persecution", "them": "delight"}
 
 
-def classify(ev: Event, stats_fn=None) -> Beat | None:
+def classify(ev: Event, stats_fn=None, ability_fn=None) -> Beat | None:
     """Map one Event to a Beat, or None for pure color (rides along in the
     beat text without owning a moment). stats_fn(species_display) ->
-    (atk, spa) or None enables the burn physical-vs-special split."""
+    (atk, spa) enables the burn physical-vs-special split; ability_fn(
+    species_display, side) -> set of possible normalized ability ids enables
+    the status-synergy read (a status the mon's ability wants is a boon)."""
     t = ev.type
     if t == "belief_delta":
         # set-inference confirmation ("that's a Scarf") — not a protocol
@@ -710,6 +732,33 @@ def classify(ev: Event, stats_fn=None) -> Beat | None:
     if t == "status_applied":
         status = ev.data.get("status")
         cause = (ev.data.get("cause") or "")
+        mon = ev.data.get("mon")
+        # a status the afflicted mon's ability WANTS is a boon, not a wound:
+        # Toxic on a Poison Heal Gliscor heals it; burn on a Guts attacker
+        # boosts it. Read it as the plan working — never the gremlin's grief.
+        if ability_fn is not None and mon and status:
+            abilities = ability_fn(mon, ev.side) or set()
+            synergy = {a for a in abilities
+                       if status in _STATUS_SYNERGY.get(a, ())}
+            if synergy:
+                # certain when EVERY possible ability wants it (our own mons
+                # resolve to a single known ability -> definitive)
+                certain = all(status in _STATUS_SYNERGY.get(a, ())
+                              for a in abilities)
+                name = _SYNERGY_NAME[sorted(synergy)[0]]
+                if ev.side == "us":
+                    tail = (f" — that just feeds {mon}'s {name}" if certain
+                            else f" — if that's the {name} set, it just fed it")
+                    reg = "status-boon"
+                else:
+                    tail = (f" — but that turns on {mon}'s {name}" if certain
+                            else f" — but if that's the {name} set, we just "
+                                 f"helped it")
+                    reg = "status-backfire"
+                return make_beat("status", ev.prose + tail, persona="analyst",
+                                 priority="normal",
+                                 register=reg if certain else reg + "-hedge",
+                                 **ev.data)
         if status == "slp" and cause in ("Yawn", "Rest"):
             # deliberate sleep — Yawn's negotiated stay-in, or Rest buying
             # recovery with tempo (real replays showed Rest routing to the
@@ -779,11 +828,12 @@ class Director:
     fabricate ctx from replays."""
 
     def __init__(self, min_interval: float = 20.0, min_swing: float = 0.10,
-                 floor: float = 5.0, stats_fn=None):
+                 floor: float = 5.0, stats_fn=None, ability_fn=None):
         self.min_interval = min_interval
         self.min_swing = min_swing
         self.floor = floor
         self.stats_fn = stats_fn
+        self.ability_fn = ability_fn
         self.reset()
 
     def reset(self):
@@ -852,7 +902,8 @@ class Director:
                 or ctx.elapsed >= self.min_interval):
             return Decision(None, [], True)
 
-        pairs = [(ev, classify(ev, self.stats_fn)) for ev in self._pending]
+        pairs = [(ev, classify(ev, self.stats_fn, self.ability_fn))
+                 for ev in self._pending]
         beats = [b for _, b in pairs if b is not None]
         if esc_prose:
             beats.append(make_beat("status_recovery", esc_prose,
@@ -885,7 +936,11 @@ class Director:
                         -(_PRIORITY_RANK.get(t[2].priority, 0)
                           if t[2] else 0), -t[0]))
                 cand = sorted(ranked[:4], key=lambda t: t[0])
-            hl = [ev.prose for _, ev, _ in cand]
+            # prefer the classified beat's prose: identical to the event's
+            # for most beats, but carries added reads (the status-synergy
+            # "— that feeds its Poison Heal" tail) into the spoken text
+            hl = [(b.prose if b and b.prose else ev.prose)
+                  for _, ev, b in cand]
             if esc_prose:
                 hl.append(esc_prose)
             if hl:
