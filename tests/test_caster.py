@@ -193,6 +193,39 @@ def test_fabricated_crit_triggers_one_regen():
     assert "crit" not in c.transcript[-1][1].lower()
 
 
+def test_fabricated_synergy_detection():
+    c = Caster("http://unused", "test-model")
+    # beat about a poison with NO ability flag -> naming Poison Heal is invented
+    plain = {"text": "[BATTLE T57] badly poisoned Dragonite. X vs Pecharunt."}
+    assert c._fabricated_synergy(
+        "The poison is a boon for Pecharunt via Poison Heal.", plain)
+    # beat carries the real synergy tail -> naming it is fine
+    real = {"text": "[BATTLE T28] badly poisoned Gliscor — that just feeds "
+                    "Gliscor's Poison Heal."}
+    assert not c._fabricated_synergy(
+        "That Toxic heals Gliscor through Poison Heal.", real)
+    # no synergy claim at all -> fine
+    assert not c._fabricated_synergy("Pecharunt is poisoned and chipping.",
+                                     plain)
+
+
+def test_fabricated_synergy_triggers_one_regen():
+    c = Caster("http://unused", "test-model")
+    calls = []
+
+    def fake_gen(persona, item, nudge=None, temp_boost=0.0):
+        calls.append(nudge)
+        return ("The poison feeds its Guts, honestly." if nudge is None
+                else "The poison just chips it down each turn.")
+
+    c._generate_sync = fake_gen
+    item = {"text": "[BATTLE T9] badly poisoned Pecharunt. X vs Y.",
+            "beats": [], "hud": None}
+    asyncio.run(c.speak(item))
+    assert len(calls) == 2 and calls[1] is not None
+    assert "guts" not in c.transcript[-1][1].lower()
+
+
 def test_skip_dont_queue():
     """A newer turn beat replaces an unspoken older one; framing beats
     (MATCH START / RESULT) all survive."""

@@ -65,6 +65,11 @@ _GEN = {
 }
 _PERSONA_FILE = {"PRISM": "prism.txt", "FRACTURE": "fracture.txt"}
 
+# status-synergy ability names (lowercased); a caster naming one the beat
+# never flagged is inventing a mechanic — see _fabricated_synergy
+_SYNERGY_ABILITIES = ("poison heal", "guts", "quick feet", "marvel scale",
+                      "flare boost", "toxic boost")
+
 # analytic angles rotated across PRISM's plain turn updates: the beat text
 # is a fixed template, and a fixed task on top of it collapses him into
 # caption mode ("the search is opting for X, the desk read shows Y" every
@@ -264,6 +269,20 @@ class Caster:
             return False
         return "critical" not in (item.get("text") or "").lower()
 
+    @staticmethod
+    def _fabricated_synergy(line: str, item: dict) -> bool:
+        """True when the line names a status-synergy ability the beat never
+        flagged. The director only writes an ability name into the beat when
+        a status genuinely fed it (Toxic on Poison Heal), so naming one the
+        beat doesn't is an invented mechanic — measured live: the synergy
+        framing leaked from an earlier turn's transcript onto Pecharunt,
+        which has no such ability."""
+        beat = (item.get("text") or "").lower()
+        for ability in _SYNERGY_ABILITIES:
+            if ability in line.lower() and ability not in beat:
+                return True
+        return False
+
     def _same_opener(self, persona: str, line: str, words: int = 4) -> bool:
         """True when `line` opens with the same first words as this
         persona's most recent line — the measured mode-collapse signature
@@ -300,6 +319,20 @@ class Caster:
                         "what the beat reports.")
                     retry = _sanitize(_SELF_LABEL.sub("", raw.strip()))
                     if retry and not self._fabricated_crit(retry, item):
+                        line = retry
+                except Exception:
+                    pass
+            # fabricated-synergy guard: a status-boon read the beat never
+            # flagged (the framing leaks from an earlier turn's transcript)
+            if line and self._fabricated_synergy(line, item):
+                try:
+                    raw = await asyncio.to_thread(
+                        self._generate_sync, persona, item,
+                        "Do NOT say any ability turns this status into an "
+                        "advantage — the beat does not report that. Treat the "
+                        "status as an ordinary status.")
+                    retry = _sanitize(_SELF_LABEL.sub("", raw.strip()))
+                    if retry and not self._fabricated_synergy(retry, item):
                         line = retry
                 except Exception:
                     pass
