@@ -37,7 +37,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import yaml
 
-from showdown.beat_director import Director, ProtocolScanner, TurnContext
+from showdown.beat_director import (Director, Event, ProtocolScanner,
+                                    TurnContext)
 
 GOLD_DEFAULT = Path(__file__).parent / "gold" / "commentary_gold.yaml"
 
@@ -223,6 +224,10 @@ def run_director(entry: dict) -> tuple[list, object, list[str]]:
         director = Director(stats_fn=DATA.stats)
         for batch in fx.get("batches", []):
             director.observe(scanner.scan(batch, fx.get("role")))
+        # injected (non-protocol) events: belief deltas, notes — the player
+        # feeds these directly, so the gold fixture does too
+        for e in fx.get("events", []):
+            director.observe([Event(**e)])
         decisions = [director.decide(_ctx(c)) for c in fx["ctx"]]
     final = decisions[-1]
     misses = []

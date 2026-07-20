@@ -680,6 +680,14 @@ def classify(ev: Event, stats_fn=None) -> Beat | None:
     beat text without owning a moment). stats_fn(species_display) ->
     (atk, spa) or None enables the burn physical-vs-special split."""
     t = ev.type
+    if t == "belief_delta":
+        # set-inference confirmation ("that's a Scarf") — not a protocol
+        # event; the live player injects it when the search adopts a new
+        # inferred item. Either voice (gc-0018/19): analyst cites the
+        # evidence chain, gremlin claims they called it.
+        return make_beat("set_reveal", ev.prose, persona="either",
+                         priority="interrupt", register="set-reveal",
+                         **ev.data)
     if t == "ko":
         return make_beat("ko", ev.prose,
                          register="grief" if ev.side == "us" else "triumph",

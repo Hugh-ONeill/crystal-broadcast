@@ -471,3 +471,42 @@
       - {turn: 14, value: 0.45, elapsed: 30.0, me_name: Gholdengo, me_hp: 60,
          opp_name: Kingambit, opp_hp: 100,
          ours_fainted: [Darkrai]}
+
+# --- set-inference belief-delta reveals (gc-0018/19) -----------------------
+# "wait, that's a Scarf" — the player injects a belief_delta event when the
+# search adopts a new inferred item. Not protocol-derived, so the fixture
+# uses `events` (fed straight to director.observe) rather than `batches`.
+
+- id: gc-0018-r
+  beat: set_reveal
+  persona: either
+  priority: interrupt
+  must_mention: ["Iron Valiant", "scarf"]
+  fixture:
+    role: p1
+    events:
+      - type: belief_delta
+        prose: "set inference confirms Iron Valiant's Choice Scarf: it outsped what any legal set allows"
+        side: them
+        notable: true
+        data: {species: ironvaliant, item: choicescarf}
+    ctx:
+      - {turn: 8, value: 0.45, elapsed: 30.0, me_name: Gholdengo, me_hp: 70,
+         opp_name: Iron Valiant, opp_hp: 60}
+
+- id: gc-0019-r
+  beat: set_reveal
+  persona: either
+  priority: interrupt
+  must_mention: ["Kingambit", "Choice Band|band|item"]
+  fixture:
+    role: p1
+    events:
+      - type: belief_delta
+        prose: "set inference confirms Kingambit's Choice Band: it hit past its max damage roll"
+        side: them
+        notable: true
+        data: {species: kingambit, item: choiceband}
+    ctx:
+      - {turn: 12, value: 0.4, elapsed: 30.0, me_name: Corviknight, me_hp: 55,
+         opp_name: Kingambit, opp_hp: 90}
