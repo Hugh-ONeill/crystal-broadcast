@@ -196,16 +196,23 @@ def render(s: dict, connected: bool, history: list | None = None):
             out.extend(block)
             out.append("\n")
 
-    # --- sources card (the expert facts PRISM cited) -------------------
+    # --- sources card (the expert facts PRISM cited) — PINNED to the
+    # bottom of the panel so it reads as a broadcast lower-third footer,
+    # not a card floating mid-panel with dead space beneath it ----------
+    foot = []
     if citations:
-        out.append(_box_top(f"{DIM}sources{RESET}", "", iw))
+        foot.append(_box_top(f"{DIM}sources{RESET}", "", iw))
         for cite in citations[:3]:
             label = cite.get("label", "?")
             corpus = cite.get("corpus", "")
-            out.append(_box_row(
+            foot.append(_box_row(
                 f"{ACCENT}◇{RESET} {WHITE}{label}{RESET}"
                 f"{DIM}  ·  {corpus}{RESET}", iw))
-        out.append(_box_bottom(iw))
+        foot.append(_box_bottom(iw))
+        used = "".join(out).count("\n")
+        gap = max(1, rows - used - len(foot) - 1)
+        out.append("\n" * gap)
+        out.extend(foot)
 
     sys.stdout.write("".join(out))
     sys.stdout.flush()
