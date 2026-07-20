@@ -82,6 +82,17 @@ def _momentum(mom, width=17):
 SHARD = _c(120, 180, 255)      # FRACTURE's crystal blue
 _SPEAKER_COLOR = {"PRISM": ACCENT, "FRACTURE": SHARD}
 
+# spoken desk-read phrase -> compact meter label (matched by substring)
+_READ_LABELS = [
+    ("all but sealed", "all but sealed"),
+    ("clearly ahead", "clearly ahead"),
+    ("real edge", "real edge"),
+    ("dead even", "dead even"),
+    ("behind in this", "behind"),
+    ("deep trouble", "deep trouble"),
+    ("nearly gone", "nearly gone"),
+]
+
 
 def render(s: dict, connected: bool, history: list | None = None):
     cols, rows = shutil.get_terminal_size((110, 40))
@@ -111,10 +122,13 @@ def render(s: dict, connected: bool, history: list | None = None):
         out.append(f"  {DIM}THEM{RESET} {_balls(s.get('them_alive'))}   "
                    f"{WHITE}{_pretty(them):<13}{RESET}"
                    f"{_hp_bar(s.get('them_hp'))}\n")
-        # just the position clause (before the comma); the swing is in prose
+        # compact band label — the old read[:28] chop cut mid-word
+        # ("this one looks all but seale")
         read = (s.get("read") or "").split(",")[0].strip()
+        label = next((short for key, short in _READ_LABELS
+                      if key in read), read[:24])
         out.append(f"  {DIM}MOMENTUM{RESET} {_momentum(s.get('mom'))}  "
-                   f"{DIM}{read[:28]}{RESET}\n")
+                   f"{DIM}{label}{RESET}\n")
 
     # big-moment banner
     moment = s.get("moment")

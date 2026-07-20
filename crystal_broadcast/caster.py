@@ -53,12 +53,28 @@ DEFAULT_UPSTREAM = "http://127.0.0.1:11435"
 DEFAULT_MODEL = "gemma4:26b-a4b-it-q4_K_M"
 
 # generation knobs per persona: FRACTURE runs hot and short, PRISM cool
-# and a touch longer
+# and a touch longer. frequency_penalty pushes against echoing the duo
+# transcript (which is in-context), the main driver of same-y lines.
 _GEN = {
-    "FRACTURE": {"temperature": 1.0, "max_tokens": 90},
-    "PRISM": {"temperature": 0.6, "max_tokens": 140},
+    "FRACTURE": {"temperature": 1.0, "max_tokens": 90,
+                 "frequency_penalty": 0.4},
+    "PRISM": {"temperature": 0.85, "max_tokens": 140,
+              "frequency_penalty": 0.4},
 }
 _PERSONA_FILE = {"PRISM": "prism.txt", "FRACTURE": "fracture.txt"}
+
+# analytic angles rotated across PRISM's plain turn updates: the beat text
+# is a fixed template, and a fixed task on top of it collapses him into
+# caption mode ("the search is opting for X, the desk read shows Y" every
+# line — measured, an entire match of it). A rotating lens changes the
+# TASK per line, which changes the sentence shapes with it.
+_PRISM_ANGLES = [
+    "name the one thing that actually changed this turn",
+    "say what this positions us for two or three turns out",
+    "price the trade that just happened: what it cost, what it bought",
+    "note what the opponent is trying to do and whether it is working",
+    "one dry observation, a single short sentence",
+]
 
 # director persona tag -> speaker(s). "either" resolves by priority: the
 # gremlin owns fast reactions, the desk owns considered ones (the docs'
@@ -151,7 +167,8 @@ class Caster:
             self.clients.discard(c)
 
     # --- generation ------------------------------------------------------
-    def _prompt(self, persona: str, item: dict) -> list[dict]:
+    def _prompt(self, persona: str, item: dict,
+                nudge: str | None = None) -> list[dict]:
         beats = item["beats"]
         register = next((b.get("register") for b in beats
                          if b.get("register")), None)
@@ -159,8 +176,15 @@ class Caster:
         direction = f"You are {persona}."
         if register:
             direction += f" Register: {register}."
+        elif persona == "PRISM" and not beats:
+            # plain turn update: rotate the analytic lens so consecutive
+            # tasks (and therefore sentence shapes) differ
+            turn = (item.get("hud") or {}).get("turn") or 0
+            direction += f" Angle: {_PRISM_ANGLES[turn % len(_PRISM_ANGLES)]}."
         direction += (" One or two short spoken sentences, react now. "
                       "Output only the line itself.")
+        if nudge:
+            direction += f" {nudge}"
         user = ""
         if transcript:
             user += f"Broadcast so far:\n{transcript}\n\n"
@@ -168,12 +192,16 @@ class Caster:
         return [{"role": "system", "content": self.prompts[persona]},
                 {"role": "user", "content": user}]
 
-    def _generate_sync(self, persona: str, item: dict) -> str:
+    def _generate_sync(self, persona: str, item: dict,
+                       nudge: str | None = None,
+                       temp_boost: float = 0.0) -> str:
+        knobs = dict(_GEN[persona])
+        knobs["temperature"] = knobs["temperature"] + temp_boost
         body = json.dumps({
             "model": self.model,
-            "messages": self._prompt(persona, item),
+            "messages": self._prompt(persona, item, nudge=nudge),
             "stream": False,
-            **_GEN[persona],
+            **knobs,
         }).encode()
         req = urllib.request.Request(
             f"{self.upstream}/v1/chat/completions", data=body,
@@ -181,6 +209,17 @@ class Caster:
         with urllib.request.urlopen(req, timeout=120) as resp:
             out = json.load(resp)
         return out["choices"][0]["message"]["content"]
+
+    def _same_opener(self, persona: str, line: str, words: int = 4) -> bool:
+        """True when `line` opens with the same first words as this
+        persona's most recent line — the measured mode-collapse signature
+        ('The search is opting...' x13 in one match)."""
+        prev = next((ln for p, ln in reversed(self.transcript)
+                     if p == persona), None)
+        if prev is None:
+            return False
+        opener = lambda s: [w.lower().strip(".,!?") for w in s.split()[:words]]
+        return opener(prev) == opener(line) and len(opener(line)) == words
 
     async def speak(self, item: dict):
         if item["text"].startswith("[MATCH START]"):
@@ -194,6 +233,20 @@ class Caster:
                       flush=True)
                 continue
             line = _sanitize(_SELF_LABEL.sub("", raw.strip()))
+            # opener-repetition guard: one hotter retry with an explicit
+            # nudge; keep whatever the retry gives (never loop)
+            if line and self._same_opener(persona, line):
+                try:
+                    raw = await asyncio.to_thread(
+                        self._generate_sync, persona, item,
+                        "Do NOT start with the words your previous line "
+                        "started with; change the sentence shape entirely.",
+                        0.3)
+                    retry = _sanitize(_SELF_LABEL.sub("", raw.strip()))
+                    if retry:
+                        line = retry
+                except Exception:
+                    pass
             if not line:
                 print(f"caster: {persona} line sanitized to empty, "
                       f"dropped: {raw[:90]!r}", flush=True)

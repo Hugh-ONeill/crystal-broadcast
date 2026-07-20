@@ -125,6 +125,10 @@ def _sanitize(text: str) -> str:
     sentences = _SENTENCE.findall(text)
     if len(sentences) > _MAX_SENTENCES:
         text = "".join(sentences[:_MAX_SENTENCES]).strip()
+    elif sentences and not text.rstrip().endswith(tuple(".!?…")):
+        # max_tokens cut mid-sentence ("... DARKRAI IN,"): drop the
+        # dangling fragment, keep the complete sentences before it
+        text = "".join(sentences).strip()
     return text
 
 

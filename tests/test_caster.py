@@ -104,6 +104,56 @@ def test_sanitizer_guards_output():
     assert sent == []          # scaffolding never reaches the feed
 
 
+def test_opener_guard_retries_once_with_nudge():
+    c = Caster("http://unused", "test-model")
+    c.transcript.append(("PRISM", "The search is opting for Earthquake."))
+    calls = []
+
+    def fake_gen(persona, item, nudge=None, temp_boost=0.0):
+        calls.append((nudge, temp_boost))
+        if nudge is None:
+            return "The search is opting for Make It Rain."   # same opener
+        return "Make It Rain buys back the tempo we spent."
+
+    c._generate_sync = fake_gen
+    asyncio.run(c.speak({"text": "[BATTLE T5] x", "beats": [], "hud": None}))
+    assert len(calls) == 2
+    assert calls[1][0] is not None and calls[1][1] == 0.3
+    assert c.transcript[-1] == ("PRISM",
+                                "Make It Rain buys back the tempo we spent.")
+
+
+def test_opener_guard_ignores_different_openers():
+    c = Caster("http://unused", "test-model")
+    c.transcript.append(("PRISM", "The search is opting for Earthquake."))
+    calls = []
+
+    def fake_gen(persona, item, nudge=None, temp_boost=0.0):
+        calls.append(nudge)
+        return "Tempo is the whole story of this turn."
+
+    c._generate_sync = fake_gen
+    asyncio.run(c.speak({"text": "[BATTLE T6] x", "beats": [], "hud": None}))
+    assert calls == [None]
+
+
+def test_prism_angle_rotates_by_turn():
+    c = Caster("http://unused", "test-model")
+    prompts = [c._prompt("PRISM", {"text": "[BATTLE T%d] x" % t,
+                                   "beats": [], "hud": {"turn": t}})
+               for t in (1, 2, 3)]
+    angles = [p[1]["content"].split("Angle: ")[1].split(".")[0]
+              for p in prompts]
+    assert len(set(angles)) == 3
+    # register beats take precedence over the angle rotation
+    reg = c._prompt("FRACTURE", {"text": "[BATTLE T4] x",
+                                 "beats": [_beat("gremlin",
+                                                 register="despair")],
+                                 "hud": {"turn": 4}})
+    assert "Register: despair" in reg[1]["content"]
+    assert "Angle:" not in reg[1]["content"]
+
+
 def test_skip_dont_queue():
     """A newer turn beat replaces an unspoken older one; framing beats
     (MATCH START / RESULT) all survive."""
