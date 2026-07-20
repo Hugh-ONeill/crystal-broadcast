@@ -146,7 +146,7 @@ class AiriBridge:
     def __init__(self, url: str = DEFAULT_URL, name: str = "crystal-battle"):
         self._url = url
         self._name = name
-        self._queue: asyncio.Queue[str] = asyncio.Queue(maxsize=32)
+        self._queue: asyncio.Queue[tuple] = asyncio.Queue(maxsize=32)
         self._loop: asyncio.AbstractEventLoop | None = None
         self._task: asyncio.Task | None = None
         self._connected = False
@@ -166,16 +166,20 @@ class AiriBridge:
         exc = task.exception()
         print(f"  airi-bridge: run task died unexpectedly: {exc!r}")
 
-    def send(self, text: str):
-        """Queue an event from any thread; drops oldest when backed up."""
+    def send(self, text: str, **extra):
+        """Queue an event from any thread; drops oldest when backed up.
+        `extra` fields merge into the input:text data payload — AIRI reads
+        only data.text and ignores the rest, so structured side-channels
+        (director beats, HUD numbers for the caster) ride along without
+        breaking real-AIRI compatibility."""
         if self._loop is None or self._loop.is_closed():
             return
-        self._loop.call_soon_threadsafe(self._enqueue, text)
+        self._loop.call_soon_threadsafe(self._enqueue, (text, extra))
 
-    def _enqueue(self, text: str):
+    def _enqueue(self, item: tuple):
         while True:
             try:
-                self._queue.put_nowait(text)
+                self._queue.put_nowait(item)
                 return
             except asyncio.QueueFull:
                 try:
@@ -194,7 +198,7 @@ class AiriBridge:
 
     async def _run(self):
         backoff = 2.0
-        pending: str | None = None  # event to (re)send; survives reconnects
+        pending: tuple | None = None  # event to (re)send; survives reconnects
         while True:
             try:
                 async with websockets.connect(self._url) as ws:
@@ -207,9 +211,10 @@ class AiriBridge:
                         while True:
                             if pending is None:
                                 pending = await self._next_event(drain)
+                            text, extra = pending
                             await ws.send(json.dumps({
                                 "type": "input:text",
-                                "data": {"text": pending},
+                                "data": {"text": text, **(extra or {})},
                             }))
                             pending = None
                     finally:
@@ -223,7 +228,7 @@ class AiriBridge:
                 await asyncio.sleep(backoff)
                 backoff = min(backoff * 2, 60.0)
 
-    async def _next_event(self, drain: asyncio.Task) -> str:
+    async def _next_event(self, drain: asyncio.Task) -> tuple:
         """Wait for the next queued event, but also wake if the server
         closes the connection while we're idle (the drain task ends) —
         otherwise a dead socket goes unnoticed until the next beat."""
@@ -329,11 +334,17 @@ async def watch(url: str = DEFAULT_URL):
 
 
 async def _main():
-    if "--watch" in sys.argv:
-        await watch()
+    argv = sys.argv[1:]
+    url = DEFAULT_URL
+    if "--url" in argv:
+        i = argv.index("--url")
+        url = argv[i + 1]
+        del argv[i:i + 2]
+    if "--watch" in argv:
+        await watch(url)
         return
-    text = sys.argv[1] if len(sys.argv) > 1 else "Mic check from the bridge."
-    bridge = AiriBridge()
+    text = argv[0] if argv else "Mic check from the bridge."
+    bridge = AiriBridge(url=url)
     await bridge.start()
     bridge.send(text)
     # give the run task time to connect and flush the one event
