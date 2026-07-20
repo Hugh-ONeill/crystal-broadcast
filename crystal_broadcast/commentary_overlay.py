@@ -221,7 +221,9 @@ async def _source_listener(source: str):
                             hud["read"] = _latest.get("read")
                     _latest.clear()
                     _latest.update(turn=_turn_of(beat), text=clean,
-                                   persona=data.get("persona"), **hud)
+                                   persona=data.get("persona"),
+                                   citations=data.get("citations") or [],
+                                   **hud)
                     who = data.get("persona") or "-"
                     print(f"overlay feed -> {who}: {clean[:60]}", flush=True)
                     await _broadcast(json.dumps(_latest))

@@ -229,11 +229,13 @@ def test_fabricated_synergy_triggers_one_regen():
 def test_prism_fact_injection_prism_only():
     c = Caster("http://unused", "test-model", expert_url="http://x")
     c._retrieve_fact = lambda name: (
-        "unaffected by other Pokemon's status moves"
+        ("unaffected by other Pokemon's status moves",
+         {"label": "Good as Gold", "corpus": "Bulbapedia"})
         if name == "good as gold" else None)
     facts = c._gather_facts("[BATTLE T27] Gholdengo's Good as Gold is up.")
     assert facts == [("good as gold",
-                      "unaffected by other Pokemon's status moves")]
+                      "unaffected by other Pokemon's status moves",
+                      {"label": "Good as Gold", "corpus": "Bulbapedia"})]
     item = {"text": "[BATTLE T27] Gholdengo's Good as Gold.",
             "beats": [], "hud": {"turn": 27}, "_facts": facts}
     prism = c._prompt("PRISM", item)[1]["content"]

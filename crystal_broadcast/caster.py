@@ -54,6 +54,10 @@ DEFAULT_UPSTREAM = "http://127.0.0.1:11435"
 DEFAULT_MODEL = "gemma4:26b-a4b-it-q4_K_M"
 DEFAULT_GRUDGES = Path(__file__).parent / "grudges.json"
 DEFAULT_EXPERT = "http://127.0.0.1:8001"
+# corpus id -> display name for the on-screen source chip
+_CORPUS_NAME = {"bulbapedia": "Bulbapedia", "pokeapi": "PokéAPI",
+                "crystal_battle": "Smogon", "smogon": "Smogon",
+                "monotype": "Smogon"}
 
 # curated "non-obvious mechanics" whose effect PRISM tends to reason wrong
 # from the name alone — when one appears in a beat, pull the real effect
@@ -173,13 +177,14 @@ class Caster:
         self._wake = asyncio.Event()
 
     # --- grounded facts (PRISM only) -----------------------------------
-    def _retrieve_fact(self, name: str) -> str | None:
-        """Pull a mechanic's real effect from the expert (/retrieve). Cached
-        (mechanics are static); a down/absent expert degrades to None so
-        PRISM just reasons as before — never blocks or raises."""
+    def _retrieve_fact(self, name: str):
+        """Pull a mechanic's real effect from the expert (/retrieve) ->
+        (fact_text, citation) or None. citation = {'label','corpus'} for the
+        on-screen source chip. Cached (mechanics are static); a down/absent
+        expert degrades to None so PRISM reasons as before — never raises."""
         if name in self._fact_cache:
             return self._fact_cache[name]
-        fact = None
+        result = None
         try:
             body = json.dumps(
                 {"question": f"what does {name} do in Pokemon"}).encode()
@@ -191,19 +196,25 @@ class Caster:
             passages = data.get("passages") or data.get("results") or []
             texts = []
             for p in passages[:2]:
-                t = " ".join((p.get("text") or p.get("content") or "").split())
+                t = " ".join((p.get("content") or p.get("text") or "").split())
                 if t:
                     texts.append(t[:180])
             if texts:
-                fact = " | ".join(texts)
-                self._fact_cache[name] = fact   # cache hits only
+                top = passages[0]
+                title = (top.get("title") or name).split(" (")[0]
+                title = title.split(" §")[0].strip()
+                corpus = _CORPUS_NAME.get(top.get("corpus", ""),
+                                          (top.get("corpus") or "").title())
+                result = (" | ".join(texts),
+                          {"label": title, "corpus": corpus})
+                self._fact_cache[name] = result   # cache hits only
         except Exception:
-            fact = None
-        return fact
+            result = None
+        return result
 
     def _gather_facts(self, beat_text: str) -> list:
-        """(name, fact) for each curated mechanic named in the beat, capped
-        so the prompt and latency stay bounded. Runs in a worker thread."""
+        """(name, fact_text, citation) for each curated mechanic named in the
+        beat, capped so prompt and latency stay bounded. Worker-thread only."""
         if not self.expert_url:
             return []
         low = beat_text.lower()
@@ -212,9 +223,9 @@ class Caster:
         hits.sort(key=len, reverse=True)
         facts = []
         for name in hits[:2]:
-            fact = self._retrieve_fact(name)
-            if fact:
-                facts.append((name, fact))
+            got = self._retrieve_fact(name)
+            if got:
+                facts.append((name, got[0], got[1]))
         return facts
 
     # --- intake (AIRI-protocol server) ---------------------------------
@@ -252,10 +263,11 @@ class Caster:
 
     # --- output (AIRI-shaped envelopes) ---------------------------------
     async def publish(self, beat_text: str, persona: str, line: str,
-                      hud: dict | None):
+                      hud: dict | None, citations: list | None = None):
         envelope = json.dumps({"json": {
             "type": "output:gen-ai:chat:complete",
             "data": {"text": beat_text, "persona": persona, "hud": hud,
+                     "citations": citations or [],
                      "message": {"content": line}}}})
         dead = []
         for c in list(self.clients):
@@ -307,7 +319,7 @@ class Caster:
         # reason-from-the-name hallucinations (Good as Gold, Drain Punch).
         # PRISM only — FRACTURE is no-citations by contract.
         if persona == "PRISM" and item.get("_facts"):
-            lines = "\n".join(f"- {n}: {f}" for n, f in item["_facts"])
+            lines = "\n".join(f"- {n}: {f}" for n, f, _c in item["_facts"])
             user += ("GROUNDED FACTS (the GENERAL behavior of these "
                      "mechanics — don't contradict them, and you may cite "
                      "them). The beat is authoritative for what ACTUALLY "
@@ -455,7 +467,15 @@ class Caster:
                 continue
             self.transcript.append((persona, line))
             print(f"{persona}: {line}", flush=True)
-            await self.publish(item["text"], persona, line, item["hud"])
+            # cite only the facts PRISM actually referenced (mechanic named
+            # in the line) — the sources behind what he just said
+            citations = None
+            if persona == "PRISM" and item.get("_facts"):
+                low = line.lower()
+                citations = [cite for name, _f, cite in item["_facts"]
+                             if name in low or cite["label"].lower() in low]
+            await self.publish(item["text"], persona, line, item["hud"],
+                               citations)
 
     async def worker(self):
         while True:
