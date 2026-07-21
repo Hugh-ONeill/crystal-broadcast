@@ -117,6 +117,23 @@ _PRISM_ANGLES = [
     "one dry observation, a single short sentence",
 ]
 
+# stall-repeat detection. FRACTURE reuses whatever thinking-beat image she
+# landed on ("threading a needle") every few beats; a generic "vary it" rule
+# can't stop it. Compare distinctive-word bigrams: a repeated IMAGE shares one
+# ('threading needle'), while a recurring verb with a new object ('cooking a
+# masterpiece' vs 'cooking something transcendent') does not.
+_STALL_STOP = frozenset(
+    "a an the and or but to of in on at i im am is are was be been this that "
+    "it its my we our you your here now just literally single every any right "
+    "through into over with for so as not no do dont one".split())
+
+
+def _content_bigrams(line: str) -> set:
+    words = re.findall(r"[a-z']+", line.lower())
+    content = [w for w in words if len(w) > 2 and w not in _STALL_STOP]
+    return set(zip(content, content[1:]))
+
+
 # director persona tag -> speaker(s). "either" resolves by priority: the
 # gremlin owns fast reactions, the desk owns considered ones (the docs'
 # default flow).
@@ -169,6 +186,11 @@ class Caster:
         self.expert_url = expert_url          # None disables fact injection
         self._fact_cache: dict = {}           # mechanic -> fact (abilities
         self.transcript: deque = deque(maxlen=12)  # /moves don't change)
+        # FRACTURE's recent deep-think stall lines — she fixates on one image
+        # ("threading a needle") and repeats it every few beats; the shared
+        # transcript scrolls past between spaced-out stalls, so track them
+        # separately to block the repeat (see _stall_repeats)
+        self._recent_stalls: deque = deque(maxlen=5)
         self.clients: set = set()
         # skip-don't-queue: newest unspoken turn beat wins; framing beats
         # (MATCH START / RESULT) queue separately and always speak
@@ -309,6 +331,15 @@ class Caster:
             # tasks (and therefore sentence shapes) differ
             turn = (item.get("hud") or {}).get("turn") or 0
             direction += f" Angle: {_PRISM_ANGLES[turn % len(_PRISM_ANGLES)]}."
+        # FRACTURE fixates on one stall image; show her the ones already used
+        # this match so she reaches for a new one (the reactive guard in
+        # speak() is the backstop when this isn't enough)
+        if (persona == "FRACTURE" and register == "deliberating"
+                and self._recent_stalls):
+            used = "; ".join(f'"{s}"' for s in self._recent_stalls)
+            direction += (f" You have ALREADY used these stalls this match: "
+                          f"{used}. Invent a totally different image — reuse "
+                          "none of their metaphors or wording.")
         direction += (" One or two short spoken sentences, react now. "
                       "Output only the line itself.")
         if nudge:
@@ -399,10 +430,19 @@ class Caster:
         opener = lambda s: [w.lower().strip(".,!?") for w in s.split()[:words]]
         return opener(prev) == opener(line) and len(opener(line)) == words
 
+    def _stall_repeats(self, line: str) -> bool:
+        """True when a deep-think stall line reuses a distinctive image from a
+        recent stall (shares a content-word bigram) — the 'threading a needle
+        every third beat' problem a prompt rule alone couldn't stop."""
+        bg = _content_bigrams(line)
+        return any(bg & _content_bigrams(prev) for prev in self._recent_stalls)
+
     async def speak(self, item: dict):
         if item["text"].startswith("[MATCH START]"):
             self.transcript.clear()
         speakers = _speakers(item["beats"], item["text"])
+        deliberating = any(b.get("beat") == "deep_think"
+                           for b in item.get("beats") or [])
         # fetch grounded facts once per beat if PRISM will speak (off the
         # event loop; cached across turns so it's usually free)
         if "PRISM" in speakers and item.get("_facts") is None:
@@ -461,11 +501,29 @@ class Caster:
                         line = retry
                 except Exception:
                     pass
+            # stall-repeat guard: block FRACTURE reusing a recent thinking-beat
+            # image ('threading a needle' every few beats); regenerate once
+            if (line and deliberating and persona == "FRACTURE"
+                    and self._stall_repeats(line)):
+                try:
+                    used = "; ".join(f'"{s}"' for s in self._recent_stalls)
+                    raw = await asyncio.to_thread(
+                        self._generate_sync, persona, item,
+                        f"You already used these stall images this match: "
+                        f"{used}. Use a COMPLETELY different metaphor — reuse "
+                        "none of their wording.", 0.3)
+                    retry = _sanitize(_SELF_LABEL.sub("", raw.strip()))
+                    if retry and not self._stall_repeats(retry):
+                        line = retry
+                except Exception:
+                    pass
             if not line:
                 print(f"caster: {persona} line sanitized to empty, "
                       f"dropped: {raw[:90]!r}", flush=True)
                 continue
             self.transcript.append((persona, line))
+            if deliberating and persona == "FRACTURE":
+                self._recent_stalls.append(line)
             print(f"{persona}: {line}", flush=True)
             # cite only the facts PRISM actually referenced (mechanic named
             # in the line) — the sources behind what he just said

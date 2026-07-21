@@ -245,6 +245,41 @@ def test_fabricated_synergy_triggers_one_regen():
     assert "guts" not in c.transcript[-1][1].lower()
 
 
+def test_stall_repeat_detection():
+    c = Caster("http://unused", "test-model", expert_url=None)
+    c._recent_stalls.append("threading a needle through a hurricane")
+    assert c._stall_repeats("I am threading a needle right now")
+    assert not c._stall_repeats("deep-frying a whole new reality")
+    # a recurring verb with a DIFFERENT object is not a repeat
+    c._recent_stalls.append("cooking a masterpiece")
+    assert not c._stall_repeats("cooking something transcendent over here")
+    assert c._stall_repeats("still cooking a masterpiece in here")
+
+
+def test_stall_repeat_guard_regenerates():
+    """A deep-think stall that reuses a recent image regenerates once and the
+    fresh line is what gets tracked (the 'threading a needle every third beat'
+    fix)."""
+    c = Caster("http://unused", "test-model", expert_url=None)
+    c._recent_stalls.append("I am threading a needle through a hurricane.")
+    calls = []
+
+    def fake_gen(persona, item, nudge=None, temp_boost=0.0):
+        calls.append(nudge)
+        return ("Hold on, threading a needle over here!" if nudge is None
+                else "Hold on, I am running the whole tree in my skull!")
+
+    c._generate_sync = fake_gen
+    item = {"text": "[BATTLE T20] nothing separates the options here.",
+            "beats": [_beat("gremlin", register="deliberating")],
+            "hud": {"turn": 20}}
+    item["beats"][0]["beat"] = "deep_think"
+    asyncio.run(c.speak(item))
+    assert len(calls) == 2 and calls[1] is not None          # regenerated
+    assert "threading" not in c.transcript[-1][1].lower()
+    assert c._recent_stalls[-1].startswith("Hold on, I am running")
+
+
 def test_prism_fact_injection_prism_only():
     c = Caster("http://unused", "test-model", expert_url="http://x")
     c._retrieve_fact = lambda name: (
