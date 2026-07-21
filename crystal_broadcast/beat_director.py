@@ -363,6 +363,24 @@ class ProtocolScanner:
             s = side_of(side_token)
             return {"us": "our", "them": "their"}.get(s, "one")
 
+        def qual(token) -> str:
+            """Species display, prefixed 'our '/'their ' ONLY in a mirror —
+            when the SAME species holds the opposing active slot. Otherwise a
+            mirror KO reads 'Kingambit knocked out Kingambit' and the caster
+            flips whose fell (measured live: FRACTURE called our Kingambit's
+            death a self-KO by their Kingambit, twice). Non-mirror prose is
+            byte-unchanged: the opposing slot differs, so no prefix is added.
+            Needs role (side) known; with role=None (offline eval) it no-ops."""
+            species = name_of(token)
+            s = side_of(token)
+            if not s:
+                return species
+            pos = token.split(":")[0]
+            opp = ("p1" if pos[:2] == "p2" else "p2") + pos[2:]
+            if self._species.get(opp) == species:
+                return f"{'our' if s == 'us' else 'their'} {species}"
+            return species
+
         def flush():
             nonlocal cur
             if cur and cur.get("move"):
@@ -373,7 +391,13 @@ class ProtocolScanner:
             if not cur or not cur.get("move"):
                 cur = None
                 return
-            head = f"{cur['mover']}'s {cur['move']}"
+            # qualified display names (our/their in a mirror) for PROSE only;
+            # cur['mover']/['target'] stay bare species for data + matching
+            mover_disp = (qual(cur["mover_pos"]) if cur.get("mover_pos")
+                          else cur["mover"])
+            target_disp = (qual(cur["target_pos"]) if cur.get("target_pos")
+                           else cur.get("target"))
+            head = f"{mover_disp}'s {cur['move']}"
             mover_side = cur.get("mover_side")
             target_side = ({"us": "them", "them": "us"}.get(mover_side)
                            if mover_side else None)
@@ -387,7 +411,7 @@ class ProtocolScanner:
             if cur.get("effect") == "no effect":
                 out.append(Event(
                     "move_no_effect",
-                    f"{head} had no effect on {cur['target']}",
+                    f"{head} had no effect on {target_disp}",
                     side=mover_side, notable=True,
                     data={"mover": cur["mover"], "move": cur["move"],
                           "target": cur["target"]}))
@@ -408,7 +432,7 @@ class ProtocolScanner:
                     tags.append("barely a scratch")
             if cur.get("ko"):
                 # the finishing blow, attributed to the move that landed it
-                line = f"{head} knocked out {cur['target']}"
+                line = f"{head} knocked out {target_disp}"
                 if tags:
                     line += " with " + _join_phrases(tags)
                 out.append(Event("ko", line, side=target_side, notable=True,
@@ -435,8 +459,9 @@ class ProtocolScanner:
             if t == "move":
                 flush()
                 cur = {"mover": name_of(sm[2]), "move": sm[3],
-                       "mover_side": side_of(sm[2]),
+                       "mover_side": side_of(sm[2]), "mover_pos": sm[2],
                        "target": name_of(sm[4]) if len(sm) > 4 else None,
+                       "target_pos": sm[4] if len(sm) > 4 else None,
                        "effect": None, "crit": False, "dmg": None,
                        "missed": False}
             elif t == "-crit" and cur:
@@ -457,8 +482,9 @@ class ProtocolScanner:
                 if frac is not None:
                     self._hp[key] = frac
                 if (t == "-damage" and cur and old is not None
-                        and frac is not None
-                        and cur.get("target") == name_of(sm[2])):
+                        and frac is not None and cur.get("target_pos")
+                        and cur["target_pos"].split(":")[0]
+                        == sm[2].split(":")[0]):
                     cur["dmg"] = old - frac
             elif t in ("switch", "drag"):
                 key = sm[2].split(":")[0]
@@ -471,7 +497,7 @@ class ProtocolScanner:
                     cur["ko"] = True  # attribute to the finishing move
                 else:
                     flush()  # residual: poison/hazard/recoil/Life Orb etc.
-                    out.append(Event("ko", f"{mon} went down",
+                    out.append(Event("ko", f"{qual(sm[2])} went down",
                                      side=side_of(sm[2]), notable=True,
                                      data={"target": mon, "residual": True}))
             elif t == "-status" and len(sm) > 3:

@@ -60,6 +60,53 @@ def test_scanner_yawn_cause_captured():
     assert evs[0].data["cause"] == "Yawn"
 
 
+def test_mirror_ko_disambiguates_ownership():
+    """In a species mirror the KO prose must say WHOSE fell — bare
+    'Kingambit knocked out Kingambit' let the caster flip ownership
+    (measured live: FRACTURE called our Kingambit's death a self-KO)."""
+    sc = ProtocolScanner()
+    evs = sc.scan([
+        ["", "switch", "p1a: Kingambit", "Kingambit, M", "100/100"],
+        ["", "switch", "p2a: Kingambit", "Kingambit, M", "100/100"],
+        ["", "move", "p1a: Kingambit", "Low Kick", "p2a: Kingambit"],
+        ["", "-supereffective", "p2a: Kingambit"],
+        ["", "-damage", "p2a: Kingambit", "0 fnt"],
+        ["", "faint", "p2a: Kingambit"],
+    ], role="p2")                      # WE are p2
+    ko = next(e for e in evs if e.type == "ko")
+    assert "their Kingambit's Low Kick knocked out our Kingambit" in ko.prose
+    assert ko.side == "us"             # our mon fell
+    # data stays bare species for machine use
+    assert ko.data["mover"] == "Kingambit" and ko.data["target"] == "Kingambit"
+
+
+def test_mirror_residual_faint_disambiguates():
+    sc = ProtocolScanner()
+    evs = sc.scan([
+        ["", "switch", "p1a: Gliscor", "Gliscor, M", "100/100"],
+        ["", "switch", "p2a: Gliscor", "Gliscor, M", "100/100"],
+        ["", "faint", "p2a: Gliscor"],           # residual, no move this turn
+    ], role="p2")
+    ko = next(e for e in evs if e.type == "ko")
+    assert ko.prose == "our Gliscor went down"
+
+
+def test_non_mirror_prose_byte_unchanged():
+    """Different species on each side -> no our/their prefix (the KO/move
+    prose must stay byte-identical to before the mirror fix)."""
+    sc = ProtocolScanner()
+    evs = sc.scan([
+        ["", "switch", "p1a: Great Tusk", "Great Tusk", "100/100"],
+        ["", "switch", "p2a: Gholdengo", "Gholdengo", "100/100"],
+        ["", "move", "p1a: Great Tusk", "Earthquake", "p2a: Gholdengo"],
+        ["", "-damage", "p2a: Gholdengo", "0 fnt"],
+        ["", "faint", "p2a: Gholdengo"],
+    ], role="p2")
+    ko = next(e for e in evs if e.type == "ko")
+    assert ko.prose == "Great Tusk's Earthquake knocked out Gholdengo"
+    assert "our" not in ko.prose and "their" not in ko.prose
+
+
 # --- classification: events -> beats with persona/register ----------------
 
 def test_burn_allegiance_registers():
