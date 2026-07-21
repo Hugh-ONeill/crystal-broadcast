@@ -80,6 +80,28 @@ def test_mirror_ko_disambiguates_ownership():
     assert ko.data["mover"] == "Kingambit" and ko.data["target"] == "Kingambit"
 
 
+def test_mirror_match_ko_when_opponent_active_differs():
+    """The mirror is a MATCH property, not just an active one: our Clefable
+    dies to their Toxapex while both teams carry a Clefable, and the KO prose
+    must still say OUR Clefable (measured live: FRACTURE called our fainted
+    Clefable 'their Cleric' with their Toxapex in). Roster comes from the
+    |poke| preview (their Clefable never even switched in here)."""
+    sc = ProtocolScanner()
+    evs = sc.scan([
+        ["", "poke", "p1", "Clefable, M", "item"],     # their team HAS Clefable
+        ["", "poke", "p1", "Toxapex, F", "item"],
+        ["", "poke", "p2", "Clefable, M", "item"],     # our team HAS Clefable
+        ["", "switch", "p1a: Toxapex", "Toxapex, F", "100/100"],
+        ["", "switch", "p2a: Clefable", "Clefable, M", "50/394"],
+        ["", "move", "p1a: Toxapex", "Poison Jab", "p2a: Clefable"],
+        ["", "-damage", "p2a: Clefable", "0 fnt"],
+        ["", "faint", "p2a: Clefable"],
+    ], role="p2")
+    ko = next(e for e in evs if e.type == "ko")
+    assert "knocked out our Clefable" in ko.prose      # OURS fell
+    assert "their Toxapex" not in ko.prose             # Toxapex only theirs -> bare
+
+
 def test_mirror_residual_faint_disambiguates():
     sc = ProtocolScanner()
     evs = sc.scan([

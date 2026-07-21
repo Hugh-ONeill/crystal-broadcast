@@ -341,6 +341,12 @@ class ProtocolScanner:
         # built from them leaks the nickname ("knocked off Speak Softly" —
         # found scouting real replays; ladder opponents nickname freely)
         self._species: dict[str, str] = {}
+        # side ('p1'/'p2') -> set of species that have appeared on that team
+        # (from team-preview |poke| lines + every switch). A species on BOTH
+        # sides is a mirror MATCH, so a bare name is ambiguous even when the
+        # opponent's copy isn't the current active — this is what let FRACTURE
+        # call our fainted Clefable "their Cleric" while they had a Toxapex in.
+        self._team_species: dict[str, set] = {}
 
     def scan(self, messages, role=None) -> list[Event]:
         out: list[Event] = []
@@ -364,20 +370,20 @@ class ProtocolScanner:
             return {"us": "our", "them": "their"}.get(s, "one")
 
         def qual(token) -> str:
-            """Species display, prefixed 'our '/'their ' ONLY in a mirror —
-            when the SAME species holds the opposing active slot. Otherwise a
-            mirror KO reads 'Kingambit knocked out Kingambit' and the caster
-            flips whose fell (measured live: FRACTURE called our Kingambit's
-            death a self-KO by their Kingambit, twice). Non-mirror prose is
-            byte-unchanged: the opposing slot differs, so no prefix is added.
-            Needs role (side) known; with role=None (offline eval) it no-ops."""
+            """Species display, prefixed 'our '/'their ' in a mirror MATCH —
+            when the same species is on BOTH teams' rosters (self._team_species,
+            fed by preview + switches). A bare name is ambiguous then even when
+            the opponent's copy is NOT the current active: measured live,
+            FRACTURE called our fainted Clefable 'their Cleric' while their
+            Toxapex was in. (The earlier version only checked the opposing
+            active slot and missed exactly that case.) Non-mirror prose is
+            byte-unchanged. Needs role (side) known; role=None (eval) no-ops."""
             species = name_of(token)
             s = side_of(token)
             if not s:
                 return species
-            pos = token.split(":")[0]
-            opp = ("p1" if pos[:2] == "p2" else "p2") + pos[2:]
-            if self._species.get(opp) == species:
+            if (species in self._team_species.get("p1", ())
+                    and species in self._team_species.get("p2", ())):
                 return f"{'our' if s == 'us' else 'their'} {species}"
             return species
 
@@ -493,11 +499,19 @@ class ProtocolScanner:
                         and cur["target_pos"].split(":")[0]
                         == sm[2].split(":")[0]):
                     cur["dmg"] = old - frac
+            elif t == "poke" and len(sm) > 3:
+                # team preview ('|poke|p1|Clefable, M|item'): seed both rosters
+                # so a species shared by both teams reads as a mirror MATCH
+                # from turn 1 (switches also feed this, below)
+                self._team_species.setdefault(sm[2][:2], set()).add(
+                    sm[3].split(",")[0])
             elif t in ("switch", "drag"):
                 key = sm[2].split(":")[0]
                 self._hp[key] = (_hp_frac(sm[4]) if len(sm) > 4 else 1.0)
                 if len(sm) > 3 and sm[3]:
-                    self._species[key] = sm[3].split(",")[0]
+                    species = sm[3].split(",")[0]
+                    self._species[key] = species
+                    self._team_species.setdefault(key[:2], set()).add(species)
             elif t == "faint" and len(sm) > 2:
                 mon = name_of(sm[2])
                 if cur and cur.get("target") == mon:
