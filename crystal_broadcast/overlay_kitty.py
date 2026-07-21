@@ -30,6 +30,11 @@ import websockets
 
 WS = "ws://127.0.0.1:8130/"
 
+# how many past caption lines to keep on screen at once. The two most recent
+# read as "current" (bright/dim); older ones fade to FAINT but stay up long
+# enough to actually be read during a fast exchange.
+MAX_HISTORY = 4
+
 
 def _c(r, g, b):
     return f"\033[38;2;{r};{g};{b}m"
@@ -80,6 +85,17 @@ def _fit(content: str, w: int) -> str:
 
 def _pretty(name):
     return name[:1].upper() + name[1:] if name else "—"
+
+
+NAME_W = 15   # fixed name-column width; fits the longest gen9-OU display name
+              # ('Slowking-Galar' = 14). Longer names hard-truncate.
+
+
+def _namecol(name) -> str:
+    """Species name padded (or truncated) to NAME_W so the HP bar and ball
+    tracker line up between the US and THEM rows regardless of name length —
+    a long name like Slowking-Galar used to shove those columns out of line."""
+    return _pretty(name)[:NAME_W].ljust(NAME_W)
 
 
 def _hp_bar(pct, width=10):
@@ -147,10 +163,10 @@ def render(s: dict, connected: bool, history: list | None = None):
     us, them = s.get("us"), s.get("them")
     if us or them or s.get("us_alive") is not None:
         out.append(_box_row(
-            f"{DIM}US  {RESET} {_pretty(us):<13}{RESET} "
+            f"{DIM}US  {RESET} {_namecol(us)}{RESET} "
             f"{_hp_bar(s.get('us_hp'))}   {_balls(s.get('us_alive'))}", iw))
         out.append(_box_row(
-            f"{DIM}THEM{RESET} {_pretty(them):<13}{RESET} "
+            f"{DIM}THEM{RESET} {_namecol(them)}{RESET} "
             f"{_hp_bar(s.get('them_hp'))}   {_balls(s.get('them_alive'))}", iw))
         read = (s.get("read") or "").split(",")[0].strip()
         label = next((sh for key, sh in _READ_LABELS if key in read),
@@ -175,7 +191,10 @@ def render(s: dict, connected: bool, history: list | None = None):
     for i, (persona, text) in enumerate(entries):
         if not text:
             continue
-        color = WHITE if i == len(entries) - 1 else DIM
+        # recency ramp: most recent bright, the 2nd dim ("current" pair),
+        # anything older faded to FAINT — visibly in the past but still legible
+        depth = len(entries) - 1 - i
+        color = WHITE if depth == 0 else DIM if depth == 1 else FAINT
         tag = (f"{_SPEAKER_COLOR.get(persona, WHITE)}{BOLD}{persona}{RESET}  "
                if persona else "")
         indent = len(persona) + 2 if persona else 0
@@ -233,8 +252,11 @@ def _selftest():
              "citations": [{"label": "Rapid Spin", "corpus": "Bulbapedia"}]}
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
-        render(state, True, history=[("FRACTURE", "MY spin read!"),
-                                     ("PRISM", state["text"])])
+        render(state, True, history=[
+            ("PRISM", "Two turns ago we committed the hazards."),
+            ("FRACTURE", "I have been screaming about this exact line."),
+            ("FRACTURE", "MY spin read!"),
+            ("PRISM", state["text"])])
     plain = _ANSI.sub("", buf.getvalue())
     box_widths = {len(ln) for ln in plain.split("\n")
                   if ln and ln[0] in "╭│╰"}
@@ -259,7 +281,7 @@ async def run():
                     entry = (state.get("persona"), state.get("text") or "")
                     if entry[1] and (not history or history[-1] != entry):
                         history.append(entry)
-                        del history[:-2]
+                        del history[:-MAX_HISTORY]
                     render(state, connected=True, history=history)
         except (KeyboardInterrupt, asyncio.CancelledError):
             raise
