@@ -107,6 +107,95 @@ def test_non_mirror_prose_byte_unchanged():
     assert "our" not in ko.prose and "their" not in ko.prose
 
 
+def test_sleep_talk_move_labeled():
+    """A move called by Sleep Talk is labeled, so 'Crunch' on an asleep mon
+    reads as the Sleep Talk call it is (user-caught: looked like a stray
+    direct move)."""
+    sc = ProtocolScanner()
+    evs = sc.scan([
+        ["", "switch", "p1a: Gliscor", "Gliscor", "100/100"],
+        ["", "switch", "p2a: Dondozo", "Dondozo", "100/100"],
+        ["", "move", "p2a: Dondozo", "Sleep Talk", "p2a: Dondozo"],
+        ["", "move", "p2a: Dondozo", "Crunch", "p1a: Gliscor",
+         "[from] move: Sleep Talk"],
+        ["", "-damage", "p1a: Gliscor", "40/100"],
+    ], role="p2")
+    hit = next(e for e in evs if e.type == "move_hit")
+    assert "Dondozo's Crunch (via Sleep Talk)" in hit.prose
+    # the Sleep Talk vehicle itself (no damage) emits no separate beat
+    assert not any("Sleep Talk" in e.prose and "via" not in e.prose
+                   for e in evs)
+
+
+def test_mirror_volatile_qualified():
+    sc = ProtocolScanner()
+    evs = sc.scan([
+        ["", "switch", "p1a: Dondozo", "Dondozo", "100/100"],
+        ["", "switch", "p2a: Dondozo", "Dondozo", "100/100"],
+        ["", "-start", "p2a: Dondozo", "Substitute"],
+    ], role="p2")
+    v = next(e for e in evs if e.type == "volatile_start")
+    assert "our Dondozo put up a Substitute" in v.prose
+
+
+def test_mirror_matchup_line_qualified():
+    """The 'X vs Y' matchup line in the composed beat must tag our/their in a
+    mirror — an unqualified 'Corviknight (5%) vs Corviknight (81%)' flipped
+    HP ownership (measured live: 'their Corviknight crippled' when it was
+    ours at 5%)."""
+    d = Director()
+    dec = d.decide(_ctx(turn=104, value=0.5, elapsed=30.0,
+                        me_name="Corviknight", me_hp=5,
+                        opp_name="Corviknight", opp_hp=81))
+    assert "our Corviknight (5% hp) vs their Corviknight (81% hp)" in dec.text
+    # non-mirror is byte-unchanged
+    dec2 = d.decide(_ctx(turn=105, value=0.5, elapsed=30.0,
+                         me_name="Gliscor", me_hp=50,
+                         opp_name="Kingambit", opp_hp=90))
+    assert "Gliscor (50% hp) vs Kingambit (90% hp)" in dec2.text
+    assert "our Gliscor" not in dec2.text
+
+
+def test_mirror_status_prose_qualified():
+    """A status in a species mirror names whose mon took it."""
+    sc = ProtocolScanner()
+    evs = sc.scan([
+        ["", "switch", "p1a: Gliscor", "Gliscor, M", "100/100"],
+        ["", "switch", "p2a: Gliscor", "Gliscor, M", "100/100"],
+        ["", "-status", "p2a: Gliscor", "tox", "[from] item: Toxic Orb"],
+    ], role="p2")
+    st = next(e for e in evs if e.type == "status_applied")
+    assert "our Gliscor" in st.prose            # OUR Gliscor was poisoned
+    assert st.data["mon"] == "Gliscor"          # data stays bare species
+
+
+def test_rest_sleep_suppresses_escalating_grievance():
+    """A deliberate Rest sleep must not trigger the gremlin's 'STILL asleep'
+    grievance; an enemy-inflicted sleep still does (user-caught: FRACTURE
+    grieving over a Rested mon turn after turn)."""
+    d = Director()
+    d.observe([Event("status_applied", "our Dondozo fell asleep", side="us",
+                     notable=True,
+                     data={"mon": "Dondozo", "status": "slp",
+                           "cause": "Rest"})])
+    d.decide(_ctx(turn=5, me_name="Dondozo", me_status="slp", elapsed=30.0))
+    d.observe([Event("ko", "X went down", side="them", notable=True)])
+    d2 = d.decide(_ctx(turn=6, me_name="Dondozo", me_status="slp",
+                       elapsed=30.0))
+    assert "STILL asleep" not in (d2.text or "")
+    # contrast: an enemy Spore sleep DOES escalate
+    e = Director()
+    e.observe([Event("status_applied", "put Snorlax to sleep", side="us",
+                     notable=True,
+                     data={"mon": "Snorlax", "status": "slp",
+                           "cause": "Spore"})])
+    e.decide(_ctx(turn=5, me_name="Snorlax", me_status="slp", elapsed=30.0))
+    e.observe([Event("ko", "Y went down", side="them", notable=True)])
+    e2 = e.decide(_ctx(turn=6, me_name="Snorlax", me_status="slp",
+                       elapsed=30.0))
+    assert "Snorlax is STILL asleep (turn 2 of it)" in e2.text
+
+
 # --- classification: events -> beats with persona/register ----------------
 
 def test_burn_allegiance_registers():

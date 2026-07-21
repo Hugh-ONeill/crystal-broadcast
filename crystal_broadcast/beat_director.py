@@ -397,7 +397,10 @@ class ProtocolScanner:
                           else cur["mover"])
             target_disp = (qual(cur["target_pos"]) if cur.get("target_pos")
                            else cur.get("target"))
-            head = f"{mover_disp}'s {cur['move']}"
+            move_name = cur["move"]
+            if cur.get("via"):
+                move_name += f" (via {cur['via']})"
+            head = f"{mover_disp}'s {move_name}"
             mover_side = cur.get("mover_side")
             target_side = ({"us": "them", "them": "us"}.get(mover_side)
                            if mover_side else None)
@@ -462,6 +465,10 @@ class ProtocolScanner:
                        "mover_side": side_of(sm[2]), "mover_pos": sm[2],
                        "target": name_of(sm[4]) if len(sm) > 4 else None,
                        "target_pos": sm[4] if len(sm) > 4 else None,
+                       # a move CALLED by another (Sleep Talk, Metronome...):
+                       # label it so 'Crunch' on an asleep mon reads as the
+                       # Sleep Talk call it is, not a stray direct move
+                       "via": _from_move(sm[5:]),
                        "effect": None, "crit": False, "dmg": None,
                        "missed": False}
             elif t == "-crit" and cur:
@@ -505,7 +512,7 @@ class ProtocolScanner:
                 if tmpl:
                     flush()  # emit the causing move first, then its effect
                     cause = _status_cause(sm[4:])
-                    prose = tmpl.format(n=name_of(sm[2]))
+                    prose = tmpl.format(n=qual(sm[2]))
                     if cause:
                         # name the cause (move OR item like Toxic Orb) or
                         # downstream commentary invents one (a caster said
@@ -522,7 +529,7 @@ class ProtocolScanner:
                 if tmpl:
                     flush()
                     out.append(Event(
-                        "status_cured", tmpl.format(n=name_of(sm[2])),
+                        "status_cured", tmpl.format(n=qual(sm[2])),
                         side=side_of(sm[2]), notable=True,
                         data={"mon": name_of(sm[2]), "status": sm[3]}))
             elif t == "cant" and len(sm) > 3:
@@ -530,43 +537,44 @@ class ProtocolScanner:
                 if tmpl:
                     flush()
                     out.append(Event(
-                        "cant_move", tmpl.format(n=name_of(sm[2])),
+                        "cant_move", tmpl.format(n=qual(sm[2])),
                         side=side_of(sm[2]), notable=True,
                         data={"mon": name_of(sm[2]), "why": sm[3]}))
             elif t == "-enditem" and len(sm) > 3:
                 flush()
-                mon = name_of(sm[2])
+                mon = name_of(sm[2])        # bare species for data + matching
+                mon_q = qual(sm[2])         # our/their in a mirror, for prose
                 item = sm[3]
                 by = _from_cause(sm[4:])
                 ate = any("[eat]" in a for a in sm[4:])
                 mside = side_of(sm[2])
                 if by == "Knock Off":
                     out.append(Event(
-                        "item_knocked_off", f"{item} was knocked off {mon}",
+                        "item_knocked_off", f"{item} was knocked off {mon_q}",
                         side=mside, notable=True,
                         data={"mon": mon, "item": item}))
                 elif by in ("Thief", "Covet", "Magician", "Pickpocket"):
                     out.append(Event(
-                        "item_stolen", f"{mon}'s {item} was swiped away",
+                        "item_stolen", f"{mon_q}'s {item} was swiped away",
                         side=mside, notable=True,
                         data={"mon": mon, "item": item}))
                 elif item == "Focus Sash":
                     out.append(Event(
-                        "sash_saved", f"{mon}'s Focus Sash let it cling on",
+                        "sash_saved", f"{mon_q}'s Focus Sash let it cling on",
                         side=mside, notable=True,
                         data={"mon": mon, "item": item}))
                 elif item == "Air Balloon":
                     out.append(Event(
-                        "balloon_popped", f"{mon}'s Air Balloon popped",
+                        "balloon_popped", f"{mon_q}'s Air Balloon popped",
                         side=mside, notable=True,
                         data={"mon": mon, "item": item}))
                 elif ate:
                     # a berry eaten is routine tempo, not a forced beat
-                    out.append(Event("item_eaten", f"{mon} ate its {item}",
+                    out.append(Event("item_eaten", f"{mon_q} ate its {item}",
                                      side=mside,
                                      data={"mon": mon, "item": item}))
                 else:
-                    out.append(Event("item_used", f"{mon} used up its {item}",
+                    out.append(Event("item_used", f"{mon_q} used up its {item}",
                                      side=mside,
                                      data={"mon": mon, "item": item}))
             elif t == "-item" and len(sm) > 3:
@@ -575,14 +583,14 @@ class ProtocolScanner:
                     flush()
                     out.append(Event(
                         "item_tricked",
-                        f"{name_of(sm[2])} was handed a {sm[3]} by {by}",
+                        f"{qual(sm[2])} was handed a {sm[3]} by {by}",
                         side=side_of(sm[2]), notable=True,
                         data={"mon": name_of(sm[2]), "item": sm[3]}))
                 elif by in ("Thief", "Covet", "Magician", "Pickpocket"):
                     flush()
                     out.append(Event(
                         "item_stolen",
-                        f"{name_of(sm[2])} swiped a {sm[3]} with {by}",
+                        f"{qual(sm[2])} swiped a {sm[3]} with {by}",
                         side=side_of(sm[2]), notable=True,
                         data={"mon": name_of(sm[2]), "item": sm[3]}))
                 # plain reveals (switch-in, Frisk) are not dramatic: skip
@@ -602,7 +610,7 @@ class ProtocolScanner:
                 # beat; a defensive/minor +1 just rides along
                 notable = amt >= 2 or sm[3] in ("atk", "spa", "spe")
                 out.append(Event(
-                    "boost", f"{name_of(sm[2])} {adv}raised its {stat}",
+                    "boost", f"{qual(sm[2])} {adv}raised its {stat}",
                     side=side_of(sm[2]), notable=notable,
                     data={"mon": name_of(sm[2]), "stat": sm[3],
                           "amount": amt}))
@@ -612,7 +620,7 @@ class ProtocolScanner:
                 amt = int(sm[4]) if sm[4].lstrip("-").isdigit() else 1
                 adv = "sharply " if amt >= 2 else ""
                 out.append(Event(
-                    "unboost", f"{name_of(sm[2])}'s {stat} was {adv}cut",
+                    "unboost", f"{qual(sm[2])}'s {stat} was {adv}cut",
                     side=side_of(sm[2]),
                     data={"mon": name_of(sm[2]), "stat": sm[3],
                           "amount": amt}))
@@ -620,7 +628,7 @@ class ProtocolScanner:
                 flush()
                 out.append(Event(
                     "boost",
-                    f"{name_of(sm[2])} maxed out its "
+                    f"{qual(sm[2])} maxed out its "
                     f"{_STAT.get(sm[3], sm[3])}",
                     side=side_of(sm[2]), notable=True,
                     data={"mon": name_of(sm[2]), "stat": sm[3],
@@ -630,11 +638,11 @@ class ProtocolScanner:
                 if t == "-clearallboost":
                     prose = "every stat change was wiped away"
                 elif t == "-invertboost":
-                    prose = (f"{name_of(sm[2])}'s stat changes were inverted"
+                    prose = (f"{qual(sm[2])}'s stat changes were inverted"
                              if len(sm) > 2 else
                              "the stat changes were inverted")
                 else:
-                    prose = (f"{name_of(sm[2])}'s boosts were cleared"
+                    prose = (f"{qual(sm[2])}'s boosts were cleared"
                              if len(sm) > 2 else "the boosts were cleared")
                 out.append(Event("boosts_cleared", prose, notable=True,
                                  side=side_of(sm[2]) if len(sm) > 2 else None))
@@ -645,7 +653,7 @@ class ProtocolScanner:
                     flush()
                     out.append(Event(
                         "volatile_start",
-                        entry[0].format(n=name_of(sm[2])),
+                        entry[0].format(n=qual(sm[2])),
                         side=side_of(sm[2]), notable=entry[1],
                         data={"mon": name_of(sm[2]), "volatile": key}))
             elif t == "-end" and len(sm) > 3:
@@ -654,7 +662,7 @@ class ProtocolScanner:
                     flush()
                     out.append(Event(
                         "volatile_end",
-                        entry[0].format(n=name_of(sm[2])),
+                        entry[0].format(n=qual(sm[2])),
                         side=side_of(sm[2]), notable=entry[1],
                         data={"mon": name_of(sm[2]),
                               "volatile": _cond_name(sm[3]).lower()}))
@@ -671,14 +679,14 @@ class ProtocolScanner:
                 flush()
                 out.append(Event(
                     "transform",
-                    f"{name_of(sm[2])} transformed into {name_of(sm[3])}",
+                    f"{qual(sm[2])} transformed into {qual(sm[3])}",
                     side=side_of(sm[2]), notable=True,
                     data={"mon": name_of(sm[2]),
                           "into": name_of(sm[3])}))
             elif t == "-prepare" and len(sm) > 3:
                 flush()
                 out.append(Event(
-                    "charging", f"{name_of(sm[2])} is charging up {sm[3]}",
+                    "charging", f"{qual(sm[2])} is charging up {sm[3]}",
                     side=side_of(sm[2]),
                     data={"mon": name_of(sm[2]), "move": sm[3]}))
             elif t == "-sidestart" and len(sm) > 3:
@@ -946,6 +954,9 @@ class Director:
                                                            frozenset())
         # (side, mon) -> consecutive decision points spent asleep/frozen
         self._afflicted: dict = {}
+        # (side, mon) whose current sleep is a deliberate Rest — the
+        # escalating-affliction callback must not grieve over a chosen recovery
+        self._rest_sleepers: set = set()
 
     # --- ingestion -----------------------------------------------------
     def observe(self, events: list[Event]):
@@ -953,6 +964,13 @@ class Director:
             self._pending.append(ev)
             if ev.notable:
                 self._notable = True
+            # a Rest is a chosen recovery, not an enemy affliction — remember
+            # it so _tick_afflictions doesn't have the gremlin litigate the
+            # sleep turn after turn ("our Dondozo is STILL asleep")
+            if (ev.type == "status_applied"
+                    and ev.data.get("status") == "slp"
+                    and ev.data.get("cause") == "Rest"):
+                self._rest_sleepers.add((ev.side, ev.data.get("mon")))
         # keep the buffer bounded; the freshest beats matter most
         if len(self._pending) > 6:
             self._pending = self._pending[-6:]
@@ -1082,10 +1100,14 @@ class Director:
                          f"{'are' if len(lost_theirs) > 1 else 'is'} down.")
         if lost_ours:
             parts.append(f"We lost {' and '.join(lost_ours)}.")
-        me = (f"{ctx.me_name} ({ctx.me_hp}% hp)" if ctx.me_name
-              else "Our side")
-        opp = (f"{ctx.opp_name} ({ctx.opp_hp}% hp)" if ctx.opp_name
-               else "their side")
+        # in a species mirror, tag the actives our/their — an unqualified
+        # 'Corviknight (5% hp) vs Corviknight (81% hp)' left the caster unable
+        # to tell which side is ours and it flipped HP ownership (measured live)
+        mirror = bool(ctx.me_name) and ctx.me_name == ctx.opp_name
+        me_n = f"our {ctx.me_name}" if mirror else ctx.me_name
+        opp_n = f"their {ctx.opp_name}" if mirror else ctx.opp_name
+        me = (f"{me_n} ({ctx.me_hp}% hp)" if ctx.me_name else "Our side")
+        opp = (f"{opp_n} ({ctx.opp_hp}% hp)" if ctx.opp_name else "their side")
         parts.append(f"{me} vs {opp}.")
         if ctx.choice_text:
             parts.append(ctx.choice_text)
@@ -1149,7 +1171,9 @@ class Director:
                 seen.add(key)
                 self._afflicted[key] = self._afflicted.get(key, 0) + 1
                 n = self._afflicted[key]
-                if n >= 2:
+                # a deliberate Rest sleep is a chosen recovery — count it but
+                # never surface the gremlin grievance for it
+                if n >= 2 and key not in self._rest_sleepers:
                     word = "asleep" if status == "slp" else "frozen"
                     whose = "our" if side == "us" else "their"
                     lines.append(f"{whose} {name} is STILL {word} "
@@ -1157,4 +1181,5 @@ class Director:
         for key in list(self._afflicted):
             if key not in seen:
                 del self._afflicted[key]
+                self._rest_sleepers.discard(key)   # woke / left the field
         return "; ".join(lines) if lines else None
