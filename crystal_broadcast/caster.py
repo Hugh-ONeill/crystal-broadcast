@@ -31,6 +31,7 @@ import argparse
 import asyncio
 import json
 import sys
+import urllib.error
 import urllib.request
 from collections import deque
 from pathlib import Path
@@ -185,7 +186,14 @@ class Caster:
         self.grudges = GrudgeLedger.load(grudge_path)
         self.expert_url = expert_url          # None disables fact injection
         self._fact_cache: dict = {}           # mechanic -> fact (abilities
-        self.transcript: deque = deque(maxlen=12)  # /moves don't change)
+        self._expert_up: bool | None = None   # /moves don't change)
+        self._warm_task = None                # team-preview cache-warm task
+        # per-match RAG instrument (reset at MATCH START, logged at RESULT):
+        # is the expert doing anything, and is warming actually killing the
+        # cold in-game round-trips it's supposed to?
+        self._fact_stats: dict = {}
+        self._reset_fact_stats()
+        self.transcript: deque = deque(maxlen=12)
         # FRACTURE's recent deep-think stall lines — she fixates on one image
         # ("threading a needle") and repeats it every few beats; the shared
         # transcript scrolls past between spaced-out stalls, so track them
@@ -199,12 +207,80 @@ class Caster:
         self._wake = asyncio.Event()
 
     # --- grounded facts (PRISM only) -----------------------------------
-    def _retrieve_fact(self, name: str):
+    def _reset_fact_stats(self):
+        """Zero the per-match RAG counters (call at MATCH START)."""
+        self._fact_stats = {"warmed": 0, "injected": 0, "beats_with_facts": 0,
+                            "cache_hit": 0, "cold_fetch": 0, "miss": 0}
+
+    def _ping_expert(self) -> bool | None:
+        """Best-effort reachability probe for the grounded-rag expert. Any HTTP
+        response (even a 404 on the base path) means the server answered ->
+        reachable; connection-refused / timeout -> down. None if no expert
+        configured. Purely diagnostic — never affects fact injection."""
+        if not self.expert_url:
+            return None
+        try:
+            urllib.request.urlopen(self.expert_url, timeout=3)
+            return True
+        except urllib.error.HTTPError:
+            return True
+        except Exception:
+            return False
+
+    def _log_fact_summary(self):
+        """One-line per-match RAG report so 'we think it helps' becomes a
+        number: was the expert up, how many facts were warmed at preview, how
+        many landed in beats, and — the key signal — how many in-game
+        retrievals were cold round-trips vs warmed cache hits."""
+        if not self.expert_url:
+            return
+        s = self._fact_stats
+        up = ("reachable" if self._expert_up else
+              "UNREACHABLE" if self._expert_up is False else "unknown")
+        print(f"caster: RAG this match — expert {up}; warmed {s['warmed']}; "
+              f"injected {s['injected']} fact(s) into {s['beats_with_facts']} "
+              f"beat(s); in-game retrievals {s['cache_hit']} cache-hit / "
+              f"{s['cold_fetch']} cold / {s['miss']} miss", flush=True)
+
+    def _warm_cache(self, blob: str) -> int:
+        """Pre-fetch every curated mechanic named in the team-preview blob (our
+        paste + the predicted opponent paste) so the FIRST time PRISM narrates
+        it mid-battle it's already a cache hit, not a cold round-trip on the
+        critical path. Same substring match as _gather_facts, so a warmed name
+        is exactly one a beat will hit. Worker-thread only; returns the count
+        actually warmed. Bounded so a giant blob can't blast the expert."""
+        if not self.expert_url or not blob:
+            return 0
+        low = blob.lower()
+        hits = sorted({m for m in _MECHANICS if m in low},
+                      key=len, reverse=True)
+        warmed = sum(1 for name in hits[:24]
+                     if self._retrieve_fact(name, warm=True))
+        self._fact_stats["warmed"] = warmed
+        return warmed
+
+    async def _warm(self, blob: str):
+        """Warm the fact cache off the event loop; log the count. A down or
+        absent expert just warms nothing — never disturbs the match."""
+        try:
+            n = await asyncio.to_thread(self._warm_cache, blob)
+            if n:
+                print(f"caster: warmed {n} mechanic(s) from team preview",
+                      flush=True)
+        except Exception as e:
+            print(f"caster: warm-cache failed: {e!r}", flush=True)
+
+    def _retrieve_fact(self, name: str, warm: bool = False):
         """Pull a mechanic's real effect from the expert (/retrieve) ->
         (fact_text, citation) or None. citation = {'label','corpus'} for the
         on-screen source chip. Cached (mechanics are static); a down/absent
-        expert degrades to None so PRISM reasons as before — never raises."""
+        expert degrades to None so PRISM reasons as before — never raises.
+        `warm=True` marks a team-preview pre-fetch: it fills the cache but is
+        kept out of the in-game counters, so 'cold_fetch' measures only the
+        round-trips warming failed to pre-empt."""
         if name in self._fact_cache:
+            if not warm:
+                self._fact_stats["cache_hit"] += 1
             return self._fact_cache[name]
         result = None
         try:
@@ -229,9 +305,15 @@ class Caster:
                                           (top.get("corpus") or "").title())
                 result = (" | ".join(texts),
                           {"label": title, "corpus": corpus})
-                self._fact_cache[name] = result   # cache hits only
+                self._fact_cache[name] = result   # cache successes only
         except Exception:
             result = None
+        # warm successes are tallied by _warm_cache; keep them out of the
+        # in-game buckets so cold_fetch stays a clean 'warming missed this'
+        if result and not warm:
+            self._fact_stats["cold_fetch"] += 1
+        elif not result and not warm:
+            self._fact_stats["miss"] += 1
         return result
 
     def _gather_facts(self, beat_text: str) -> list:
@@ -248,6 +330,9 @@ class Caster:
             got = self._retrieve_fact(name)
             if got:
                 facts.append((name, got[0], got[1]))
+        if facts:
+            self._fact_stats["injected"] += len(facts)
+            self._fact_stats["beats_with_facts"] += 1
         return facts
 
     # --- intake (AIRI-protocol server) ---------------------------------
@@ -274,6 +359,16 @@ class Caster:
                     item = {"text": text,
                             "beats": data.get("beats") or [],
                             "hud": data.get("hud")}
+                    if text.startswith("[MATCH START]"):
+                        # fresh match: reset the RAG instrument and warm the
+                        # fact cache from the preview blob (own + predicted
+                        # opponent paste) off the event loop, so the first
+                        # in-battle narration of each mechanic is a cache hit
+                        self._reset_fact_stats()
+                        blob = data.get("preview_text")
+                        if blob and self.expert_url:
+                            self._warm_task = asyncio.create_task(
+                                self._warm(blob))
                     if (text.startswith("[MATCH START]")
                             or text.startswith("[RESULT]")):
                         self._pending_framing.append(item)
@@ -440,6 +535,8 @@ class Caster:
     async def speak(self, item: dict):
         if item["text"].startswith("[MATCH START]"):
             self.transcript.clear()
+        if item["text"].startswith("[RESULT]"):
+            self._log_fact_summary()
         speakers = _speakers(item["beats"], item["text"])
         deliberating = any(b.get("beat") == "deep_think"
                            for b in item.get("beats") or [])
@@ -567,8 +664,10 @@ async def main():
         print(f"caster: loaded {len(caster.grudges.ledger)} grudges "
               f"from {args.grudges}", flush=True)
     if caster.expert_url:
-        print(f"caster: PRISM fact injection via {caster.expert_url}",
-              flush=True)
+        caster._expert_up = caster._ping_expert()
+        state = "reachable" if caster._expert_up else "UNREACHABLE"
+        print(f"caster: PRISM fact injection via {caster.expert_url} "
+              f"(expert {state}); preview cache-warm on", flush=True)
     async with websockets.serve(caster.handle, "127.0.0.1", args.port):
         print(f"caster: duo live on ws://127.0.0.1:{args.port} "
               f"(model {args.model} via {args.upstream})", flush=True)

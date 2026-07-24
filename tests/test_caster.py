@@ -311,6 +311,52 @@ def test_fact_injection_off_and_no_hit():
     assert called == []
 
 
+def test_warm_cache_preempts_cold_fetch():
+    """Warming a mechanic from the preview blob turns its first in-battle
+    lookup into a cache hit, not a cold round-trip — the whole point of the
+    warm — and the instrument tallies it that way."""
+    c = Caster("http://unused", "test-model", expert_url="http://x")
+    fetched = []
+    cache = c._fact_cache
+
+    # stand in for the real _retrieve_fact, mirroring its counter semantics:
+    # cache hit (in-game only) bumps cache_hit; a cold net fetch (in-game
+    # only) bumps cold_fetch; warm fetches stay out of the in-game buckets
+    def fake_fetch(name, warm=False):
+        if name in cache:
+            if not warm:
+                c._fact_stats["cache_hit"] += 1
+            return cache[name]
+        fetched.append((name, warm))
+        result = (f"{name} does a thing", {"label": name, "corpus": "Smogon"})
+        cache[name] = result
+        if not warm:
+            c._fact_stats["cold_fetch"] += 1
+        return result
+
+    c._retrieve_fact = fake_fetch
+
+    # a preview blob naming a curated mechanic (Knock Off is in _MECHANICS)
+    warmed = c._warm_cache("Weavile @ Heavy-Duty Boots\n- Knock Off\n- Ice Shard")
+    assert warmed == 1
+    assert c._fact_stats["warmed"] == 1
+    assert fetched == [("knock off", True)]        # warmed, off the crit path
+
+    # now PRISM narrates it mid-battle: cache hit, zero cold fetches
+    facts = c._gather_facts("[BATTLE T9] a clean Knock Off strips the item.")
+    assert facts and facts[0][0] == "knock off"
+    assert c._fact_stats["cache_hit"] == 1
+    assert c._fact_stats["cold_fetch"] == 0        # warming pre-empted it
+    assert c._fact_stats["injected"] == 1
+
+
+def test_ping_expert_none_when_disabled():
+    c = Caster("http://unused", "test-model", expert_url=None)
+    assert c._ping_expert() is None
+    # summary is a no-op with no expert (must not raise)
+    c._log_fact_summary()
+
+
 def test_skip_dont_queue():
     """A newer turn beat replaces an unspoken older one; framing beats
     (MATCH START / RESULT) all survive."""
