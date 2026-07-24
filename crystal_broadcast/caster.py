@@ -89,6 +89,33 @@ _MECHANICS = frozenset({
     "bitter blade", "revival blessing", "future sight", "wish", "trick room",
 })
 
+# curated mechanics keyed by their spaceless form, so an ability id resolved
+# by the player ("goodasgold") maps back to the display name ("good as gold")
+# _gather_facts / the expert / the citation matcher all expect
+_MECH_BY_KEY = {re.sub(r"[^a-z0-9]", "", m): m for m in _MECHANICS}
+
+
+def _canon_mechanic(token: str | None) -> str | None:
+    """Map a raw ability/move token (id like 'goodasgold' or display like
+    'Good as Gold') to its curated display name, or None if not curated."""
+    if not token:
+        return None
+    low = token.lower()
+    if low in _MECHANICS:
+        return low
+    return _MECH_BY_KEY.get(re.sub(r"[^a-z0-9]", "", low))
+
+
+# the caption-mode residual: restating the chosen move ('the search is opting
+# for X') or reciting the desk read back ('the desk read shows Y') — the
+# mode-collapse the variety pass reduced but didn't kill. Deliberately narrow:
+# it must NOT catch the SANCTIONED qualitative attribution the persona file
+# encourages ('the search likes this line', 'it sees one line') — only the
+# move-caption template, whose tell is 'opting'/'opts for'.
+_CAPTION_RE = re.compile(
+    r"\bis opting\b|\bopting for\b|\bopts for\b|"
+    r"\bthe desk read (?:shows|says|reads)\b", re.I)
+
 # generation knobs per persona: FRACTURE runs hot and short, PRISM cool
 # and a touch longer. frequency_penalty pushes against echoing the duo
 # transcript (which is in-context), the main driver of same-y lines.
@@ -316,17 +343,28 @@ class Caster:
             self._fact_stats["miss"] += 1
         return result
 
-    def _gather_facts(self, beat_text: str) -> list:
+    def _gather_facts(self, beat_text: str, abilities=()) -> list:
         """(name, fact_text, citation) for each curated mechanic named in the
-        beat, capped so prompt and latency stay bounded. Worker-thread only."""
+        beat PLUS the two active mons' abilities (already resolved upstream to
+        single-known values), capped so prompt and latency stay bounded.
+        Injecting the active abilities is the fix for PRISM reasoning from a
+        NAME the beat didn't state — blaming Good as Gold for a Ghost's
+        spinblock. Worker-thread only."""
         if not self.expert_url:
             return []
         low = beat_text.lower()
-        hits = [m for m in _MECHANICS if m in low]
-        # longest first so 'quick feet' wins over any short substring
-        hits.sort(key=len, reverse=True)
+        # what's happening THIS turn leads; abilities ride along as context
+        beat_hits = [m for m in _MECHANICS if m in low]
+        ability_hits = []
+        for ab in abilities:
+            name = _canon_mechanic(ab)
+            if name and name not in beat_hits and name not in ability_hits:
+                ability_hits.append(name)
+        # longest first within each group so 'quick feet' wins over a substring
+        beat_hits.sort(key=len, reverse=True)
+        ability_hits.sort(key=len, reverse=True)
         facts = []
-        for name in hits[:2]:
+        for name in (beat_hits + ability_hits)[:3]:
             got = self._retrieve_fact(name)
             if got:
                 facts.append((name, got[0], got[1]))
@@ -446,15 +484,21 @@ class Caster:
         # PRISM only — FRACTURE is no-citations by contract.
         if persona == "PRISM" and item.get("_facts"):
             lines = "\n".join(f"- {n}: {f}" for n, f, _c in item["_facts"])
-            user += ("GROUNDED FACTS (the GENERAL behavior of these "
-                     "mechanics — don't contradict them, and you may cite "
-                     "them). The beat is authoritative for what ACTUALLY "
-                     "happened this turn: a move the beat says had 'no "
-                     "effect' or was immune did nothing regardless of its "
-                     "general effect (a spinblocked Rapid Spin leaves the "
-                     "hazards up). Do NOT guess WHY it had no effect or name "
-                     "an ability the beat didn't — just report that it did "
-                     f"nothing:\n{lines}\n\n")
+            user += ("GROUNDED FACTS — the real general behavior of the "
+                     "mechanics in the beat AND the true abilities of the two "
+                     "Pokemon active right now. Two hard rules: (1) NEVER name "
+                     "an ability or mechanic that isn't listed here. (2) When "
+                     "the beat says a move had 'no effect' / was immune, that "
+                     "is a TYPE matchup (a Ghost ignores Rapid Spin; the "
+                     "hazards stay up) UNLESS the beat ITSELF names the ability "
+                     "that blocked it (Levitate, Volt Absorb, Flash Fire) — "
+                     "credit an ability for an immunity ONLY when the beat "
+                     "names it, never otherwise, even for an ability listed "
+                     "below. Use these facts to add meaning to what DID happen "
+                     "— why a mon survived, why a status is actually a boon — "
+                     "never to invent a reason a move failed. Context, not a "
+                     "mandate: reach for them only when they explain the "
+                     f"moment, not every line:\n{lines}\n\n")
         # FRACTURE's Book of Grudges: inject the real vendetta for the mon
         # on the field so she can cite it. Only a recorded grudge appears
         # here, which is the whole point — her paranoia has to be earned,
@@ -514,6 +558,33 @@ class Caster:
                 return True
         return False
 
+    @staticmethod
+    def _fabricated_immunity(line: str, item: dict) -> bool:
+        """True when the beat is a no-effect outcome and the line credits an
+        ability the beat did NOT name. A TYPE immunity (a Ghost ignoring Rapid
+        Spin) carries no ability, so blaming Good as Gold is invented; but an
+        ABILITY immunity names its cause in the beat ('Rotom's Levitate
+        blocked it'), and crediting THAT is correct — so the check is
+        name-in-line AND name-not-in-beat, exactly like _fabricated_synergy.
+        The one hallucination the ability injection could reopen; regen keeps
+        the original if the retry still trips."""
+        beat = (item.get("text") or "").lower()
+        if not any(k in beat for k in
+                   ("no effect", "immune", "doesn't affect", "didn't affect")):
+            return False
+        low = line.lower()
+        return any(name in low and name not in beat
+                   for name, _f, _c in (item.get("_facts") or []))
+
+    @staticmethod
+    def _caption_phrasing(line: str) -> bool:
+        """True for the caption-mode residual — restating the chosen move
+        ('the search is opting for X') or reciting the desk read back. NOT the
+        sanctioned attribution ('the search likes this line'); only the
+        move-caption template. Recurs a few times a match even after the
+        variety pass, so it gets a mechanical regen — PRISM's tic."""
+        return bool(_CAPTION_RE.search(line))
+
     def _same_opener(self, persona: str, line: str, words: int = 4) -> bool:
         """True when `line` opens with the same first words as this
         persona's most recent line — the measured mode-collapse signature
@@ -543,8 +614,11 @@ class Caster:
         # fetch grounded facts once per beat if PRISM will speak (off the
         # event loop; cached across turns so it's usually free)
         if "PRISM" in speakers and item.get("_facts") is None:
+            hud = item.get("hud") or {}
+            abilities = [hud.get("us_ability"), hud.get("them_ability")]
             item["_facts"] = await asyncio.to_thread(
-                self._gather_facts, item["text"])
+                self._gather_facts, item["text"],
+                [a for a in abilities if a])
         for persona in speakers:
             try:
                 raw = await asyncio.to_thread(self._generate_sync,
@@ -581,6 +655,37 @@ class Caster:
                         "status as an ordinary status.")
                     retry = _sanitize(_SELF_LABEL.sub("", raw.strip()))
                     if retry and not self._fabricated_synergy(retry, item):
+                        line = retry
+                except Exception:
+                    pass
+            # fabricated-immunity guard: a no-effect/immune outcome blamed on
+            # the defender's (real, now-listed) ability — the exact spinblock
+            # hallucination the ability injection could reopen
+            if line and self._fabricated_immunity(line, item):
+                try:
+                    raw = await asyncio.to_thread(
+                        self._generate_sync, persona, item,
+                        "Do NOT credit any ability for this — the move had no "
+                        "effect because of a TYPE matchup, not the defender's "
+                        "ability. Just report that it did nothing.")
+                    retry = _sanitize(_SELF_LABEL.sub("", raw.strip()))
+                    if retry and not self._fabricated_immunity(retry, item):
+                        line = retry
+                except Exception:
+                    pass
+            # caption-mode guard: PRISM restating the move or reciting the
+            # desk read back ('the search is opting for X') — regen once for
+            # meaning over caption; keep the retry only if it clears
+            if line and persona == "PRISM" and self._caption_phrasing(line):
+                try:
+                    raw = await asyncio.to_thread(
+                        self._generate_sync, persona, item,
+                        "Do NOT say 'the search is opting for' or recite the "
+                        "desk read back — the audience already sees the move "
+                        "and the meter. Say what it MEANS, don't caption it.",
+                        0.2)
+                    retry = _sanitize(_SELF_LABEL.sub("", raw.strip()))
+                    if retry and not self._caption_phrasing(retry):
                         line = retry
                 except Exception:
                     pass

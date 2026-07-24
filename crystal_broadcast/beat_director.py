@@ -150,6 +150,16 @@ def _from_cause(events) -> str | None:
     return None
 
 
+def _from_ability(events) -> str | None:
+    """Pull the '[from] ability: X' cause out of a line's trailing args — an
+    ability-based immunity (Levitate, Volt Absorb, Flash Fire) names the
+    ability that blocked the move; a type immunity carries no such tag."""
+    for e in events:
+        if e.startswith("[from] ability:"):
+            return e.split(":", 1)[1].strip()
+    return None
+
+
 def _status_cause(events) -> str | None:
     """The source of a status: a '[from] move/item/ability: X'. Items matter
     for status specifically — a Toxic Orb / Flame Orb self-inflicts, and
@@ -418,12 +428,18 @@ class ProtocolScanner:
                 cur = None
                 return
             if cur.get("effect") == "no effect":
+                imm = cur.get("immune_ability")
+                prose = f"{head} had no effect on {target_disp}"
+                if imm:
+                    # ability immunity: name the cause so the desk credits
+                    # the RIGHT ability (Levitate/Volt Absorb), not an invented
+                    # one — and a bare 'no effect' stays a type matchup
+                    prose += f" — {target_disp}'s {imm} blocked it"
                 out.append(Event(
-                    "move_no_effect",
-                    f"{head} had no effect on {target_disp}",
+                    "move_no_effect", prose,
                     side=mover_side, notable=True,
                     data={"mover": cur["mover"], "move": cur["move"],
-                          "target": cur["target"]}))
+                          "target": cur["target"], "immune_ability": imm}))
                 cur = None
                 return
             tags = []
@@ -486,6 +502,10 @@ class ProtocolScanner:
             elif t == "-immune":
                 if cur:
                     cur["effect"] = "no effect"
+                    # an ability-based immunity names its cause; a type
+                    # immunity does not — capture it so the beat can tell
+                    # 'Levitate blocked it' from a bare Ghost type matchup
+                    cur["immune_ability"] = _from_ability(sm[3:])
             elif t == "-miss" and cur:
                 cur["missed"] = True
             elif t in ("-damage", "-heal", "-sethp"):

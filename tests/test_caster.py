@@ -134,19 +134,41 @@ def test_sanitizer_guards_output():
 
 def test_opener_guard_retries_once_with_nudge():
     c = Caster("http://unused", "test-model", expert_url=None)
-    c.transcript.append(("PRISM", "The search is opting for Earthquake."))
+    # non-caption phrasing so this isolates the OPENER guard (the caption
+    # guard, which runs first, has its own test below)
+    c.transcript.append(("PRISM", "Momentum is on our side now."))
     calls = []
 
     def fake_gen(persona, item, nudge=None, temp_boost=0.0):
         calls.append((nudge, temp_boost))
         if nudge is None:
-            return "The search is opting for Make It Rain."   # same opener
-        return "Make It Rain buys back the tempo we spent."
+            return "Momentum is on our opponent's back foot."   # same opener
+        return "The board tilts hard toward them now."
 
     c._generate_sync = fake_gen
     asyncio.run(c.speak({"text": "[BATTLE T5] x", "beats": [], "hud": None}))
     assert len(calls) == 2
     assert calls[1][0] is not None and calls[1][1] == 0.3
+    assert c.transcript[-1] == ("PRISM",
+                                "The board tilts hard toward them now.")
+
+
+def test_caption_guard_regens_in_speak():
+    """A caption-mode PRISM line ('the search is opting for X') triggers one
+    regen; the cleared retry is what reaches the transcript."""
+    c = Caster("http://unused", "test-model", expert_url=None)
+    calls = []
+
+    def fake_gen(persona, item, nudge=None, temp_boost=0.0):
+        calls.append((nudge, temp_boost))
+        if nudge is None:
+            return "The search is opting for Make It Rain."
+        return "Make It Rain buys back the tempo we spent."
+
+    c._generate_sync = fake_gen
+    asyncio.run(c.speak({"text": "[BATTLE T5] x", "beats": [], "hud": None}))
+    assert len(calls) == 2                      # initial + one regen
+    assert calls[1][0] is not None              # regen carried a nudge
     assert c.transcript[-1] == ("PRISM",
                                 "Make It Rain buys back the tempo we spent.")
 
@@ -355,6 +377,95 @@ def test_ping_expert_none_when_disabled():
     assert c._ping_expert() is None
     # summary is a no-op with no expert (must not raise)
     c._log_fact_summary()
+
+
+def test_canon_mechanic_maps_ability_ids():
+    from showdown.caster import _canon_mechanic
+    # the player resolves abilities to normalized ids; they must map back to
+    # the curated display name the expert + citation matcher expect
+    assert _canon_mechanic("goodasgold") == "good as gold"
+    assert _canon_mechanic("Good as Gold") == "good as gold"
+    assert _canon_mechanic("poisonheal") == "poison heal"
+    assert _canon_mechanic("regenerator") == "regenerator"
+    assert _canon_mechanic("notacuratedability") is None
+    assert _canon_mechanic(None) is None
+    assert _canon_mechanic("") is None
+
+
+def test_active_ability_injection():
+    """A curated active-mon ability the beat never named still gets a fact —
+    the fix for PRISM inventing an ability (Good-as-Gold-for-a-Ghost-block).
+    Beat mechanics lead; a non-curated ability is ignored; cap holds at 3."""
+    c = Caster("http://unused", "test-model", expert_url="http://x")
+    c._retrieve_fact = lambda name, warm=False: (f"{name} effect",
+                                                 {"label": name, "corpus": "x"})
+    # the beat names nothing curated; the active mon's ability is injected
+    facts = c._gather_facts("[BATTLE T5] the spin does nothing.",
+                            abilities=["goodasgold"])
+    assert [n for n, _f, _c in facts] == ["good as gold"]
+    assert c._fact_stats["injected"] == 1
+    # a non-curated ability contributes nothing
+    assert c._gather_facts("[BATTLE T6] a quiet turn.",
+                           abilities=["notacuratedability"]) == []
+    # beat mechanic leads, abilities ride along, deduped against it, cap 3
+    facts = c._gather_facts(
+        "[BATTLE T7] a clean Knock Off.",
+        abilities=["poisonheal", "regenerator", "knockoff"])
+    names = [n for n, _f, _c in facts]
+    assert names[0] == "knock off"          # what happened THIS turn leads
+    assert names.count("knock off") == 1    # deduped vs the beat hit
+    assert len(names) == 3
+    assert set(names) == {"knock off", "poison heal", "regenerator"}
+
+
+def test_fabricated_immunity_guard():
+    """The spinblock hallucination the ability injection could reopen: a
+    no-effect beat + a line crediting the (real, listed) defender ability
+    trips the guard; a clean 'no effect' line does not; and a positive line
+    naming the ability on a NON-immune beat is left alone."""
+    facts = [("good as gold",
+              "immune to opposing status moves",
+              {"label": "Good as Gold", "corpus": "Bulbapedia"})]
+    immune = {"text": "[BATTLE T9] Rapid Spin had no effect on Gholdengo.",
+              "_facts": facts}
+    # blames the ability for the immunity -> trips
+    assert Caster._fabricated_immunity(
+        "Good as Gold shuts the spin down cold.", immune) is True
+    # reports the outcome without inventing a reason -> clean
+    assert Caster._fabricated_immunity(
+        "The spin does nothing; the hazards stay put.", immune) is False
+    # a normal (non-immune) beat naming the ability is fine (positive use)
+    normal = {"text": "[BATTLE T9] Gholdengo pivots in.", "_facts": facts}
+    assert Caster._fabricated_immunity(
+        "Good as Gold waves the status away.", normal) is False
+    # ABILITY immunity: the beat NAMES the real cause, so crediting it is
+    # correct and must NOT trip (the Levitate / Volt Absorb case)
+    lev = [("levitate", "immune to Ground moves",
+            {"label": "Levitate", "corpus": "Bulbapedia"})]
+    ability_imm = {"text": "[BATTLE T9] Earthquake had no effect on Rotom — "
+                           "Rotom's Levitate blocked it.", "_facts": lev}
+    assert Caster._fabricated_immunity(
+        "Levitate floats Rotom clean over the Earthquake.", ability_imm) is False
+
+
+def test_caption_phrasing_guard():
+    """The caption-mode residual is caught (opting / desk-read recitation)
+    while the SANCTIONED qualitative 'the search' attribution is spared."""
+    catch = [
+        "The search is opting for Knock Off here.",
+        "It opts for the pivot instead.",
+        "The desk read shows a comfortable edge.",
+    ]
+    spare = [
+        "The search likes this line, and you can see why.",
+        "It sees one line and it's already walking it.",
+        "The search stopped guessing the moment their sets showed.",
+        "Down two bodies and the desk hasn't blinked.",
+    ]
+    for ln in catch:
+        assert Caster._caption_phrasing(ln) is True, ln
+    for ln in spare:
+        assert Caster._caption_phrasing(ln) is False, ln
 
 
 def test_skip_dont_queue():
