@@ -30,6 +30,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import signal
 import sys
 import urllib.error
 import urllib.request
@@ -221,11 +222,12 @@ class Caster:
         self._fact_stats: dict = {}
         self._reset_fact_stats()
         self.transcript: deque = deque(maxlen=12)
-        # FRACTURE's recent deep-think stall lines — she fixates on one image
-        # ("threading a needle") and repeats it every few beats; the shared
-        # transcript scrolls past between spaced-out stalls, so track them
-        # separately to block the repeat (see _stall_repeats)
-        self._recent_stalls: deque = deque(maxlen=5)
+        # FRACTURE's deep-think stall lines THIS match — she fixates on one
+        # image ("threading a needle") and reuses it; the shared transcript
+        # scrolls past between spaced-out stalls, so track them separately for
+        # the WHOLE match (not just the last few) so a distant repeat 80 turns
+        # later is still caught (see _stall_repeats). Reset at MATCH START.
+        self._match_stalls: list = []
         self.clients: set = set()
         # skip-don't-queue: newest unspoken turn beat wins; framing beats
         # (MATCH START / RESULT) queue separately and always speak
@@ -468,8 +470,8 @@ class Caster:
         # this match so she reaches for a new one (the reactive guard in
         # speak() is the backstop when this isn't enough)
         if (persona == "FRACTURE" and register == "deliberating"
-                and self._recent_stalls):
-            used = "; ".join(f'"{s}"' for s in self._recent_stalls)
+                and self._match_stalls):
+            used = "; ".join(f'"{s}"' for s in self._match_stalls[-8:])
             direction += (f" You have ALREADY used these stalls this match: "
                           f"{used}. Invent a totally different image — reuse "
                           "none of their metaphors or wording.")
@@ -597,15 +599,18 @@ class Caster:
         return opener(prev) == opener(line) and len(opener(line)) == words
 
     def _stall_repeats(self, line: str) -> bool:
-        """True when a deep-think stall line reuses a distinctive image from a
-        recent stall (shares a content-word bigram) — the 'threading a needle
-        every third beat' problem a prompt rule alone couldn't stop."""
+        """True when a deep-think stall line reuses a distinctive image from
+        ANY prior stall THIS MATCH (shares a content-word bigram) — the
+        'threading a needle every third beat' problem a prompt rule alone
+        couldn't stop, now caught across the whole match rather than a window
+        of the last few (which a distant recurrence would slip past)."""
         bg = _content_bigrams(line)
-        return any(bg & _content_bigrams(prev) for prev in self._recent_stalls)
+        return any(bg & _content_bigrams(prev) for prev in self._match_stalls)
 
     async def speak(self, item: dict):
         if item["text"].startswith("[MATCH START]"):
             self.transcript.clear()
+            self._match_stalls.clear()
         if item["text"].startswith("[RESULT]"):
             self._log_fact_summary()
         speakers = _speakers(item["beats"], item["text"])
@@ -708,7 +713,7 @@ class Caster:
             if (line and deliberating and persona == "FRACTURE"
                     and self._stall_repeats(line)):
                 try:
-                    used = "; ".join(f'"{s}"' for s in self._recent_stalls)
+                    used = "; ".join(f'"{s}"' for s in self._match_stalls[-8:])
                     raw = await asyncio.to_thread(
                         self._generate_sync, persona, item,
                         f"You already used these stall images this match: "
@@ -725,7 +730,7 @@ class Caster:
                 continue
             self.transcript.append((persona, line))
             if deliberating and persona == "FRACTURE":
-                self._recent_stalls.append(line)
+                self._match_stalls.append(line)
             print(f"{persona}: {line}", flush=True)
             # cite only the facts PRISM actually referenced (mechanic named
             # in the line) — the sources behind what he just said
@@ -776,7 +781,21 @@ async def main():
     async with websockets.serve(caster.handle, "127.0.0.1", args.port):
         print(f"caster: duo live on ws://127.0.0.1:{args.port} "
               f"(model {args.model} via {args.upstream})", flush=True)
-        await caster.worker()
+        # log the in-progress match's RAG summary on shutdown too — a
+        # timed-out game never emits [RESULT], and the demo harness SIGTERMs
+        # the caster to tear down, so without this the numbers are lost
+        loop = asyncio.get_running_loop()
+        stop = asyncio.Event()
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            try:
+                loop.add_signal_handler(sig, stop.set)
+            except (NotImplementedError, RuntimeError):
+                pass
+        worker = asyncio.create_task(caster.worker())
+        await stop.wait()
+        if any(caster._fact_stats.values()):
+            caster._log_fact_summary()
+        worker.cancel()
 
 
 if __name__ == "__main__":
