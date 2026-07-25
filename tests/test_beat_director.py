@@ -9,7 +9,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from showdown.beat_director import (Director, ProtocolScanner, TurnContext,
                                     classify, Event, world_collapse_prose,
-                                    endgame_solved_prose, deep_think_prose)
+                                    endgame_solved_prose, deep_think_prose,
+                                    archetype_prose)
 
 
 def _ctx(turn=5, value=0.5, elapsed=30.0, **kw):
@@ -515,6 +516,32 @@ def test_match_framing_texts():
     text, beat = d.match_end("WIN", 3, 0, "FPAiri")
     assert text.startswith("[RESULT] WIN vs FPAiri.")
     assert beat.beat == "recap" and beat.handoff == ["gremlin", "analyst"]
+
+
+def test_archetype_prose_known_and_unknown():
+    """Extensible registry: a known label yields a call-out; an unknown or
+    absent label stays silent (never mis-frames a matchup)."""
+    frame = archetype_prose("stall")
+    assert frame and "stall mirror" in frame
+    assert archetype_prose("sun") is None      # not in the registry yet
+    assert archetype_prose(None) is None
+    assert archetype_prose("") is None
+
+
+def test_match_start_folds_archetype_and_is_byte_stable_without():
+    """The archetype call-out rides the MATCH START framing when detected;
+    with no archetype the text is byte-identical to before (no regression)."""
+    d = Director()
+    base = d.match_start("Foe", ["Gliscor", "Clodsire"], ["Dondozo"],
+                         lead="Gliscor")
+    withA = d.match_start("Foe", ["Gliscor", "Clodsire"], ["Dondozo"],
+                          lead="Gliscor", archetype="stall")
+    assert "stall mirror" in withA
+    assert base == d.match_start("Foe", ["Gliscor", "Clodsire"], ["Dondozo"],
+                                 lead="Gliscor", archetype=None)
+    # an unknown archetype must not alter the baseline either
+    assert base == d.match_start("Foe", ["Gliscor", "Clodsire"], ["Dondozo"],
+                                 lead="Gliscor", archetype="rain")
 
 
 if __name__ == "__main__":

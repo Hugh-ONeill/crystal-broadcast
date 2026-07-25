@@ -266,6 +266,30 @@ def deep_think_prose(me: str | None, opp: str | None) -> str:
             f"extra clock to grind {matchup} out")
 
 
+# archetype label -> the desk's one-line matchup read, called at team preview
+# when the engine detects a recognizable game shape. EXTENSIBLE: add one row
+# per engine archetype mode as the mode enum grows (sun / rain / trick_room /
+# hyper_offense / ...). The label MUST come from the SAME detection that sets
+# the engine's eval mode, so the call-out and the play can never disagree.
+# An unknown/None label yields no beat — stay silent rather than mis-frame a
+# matchup the engine didn't actually flag.
+_ARCHETYPE_FRAME = {
+    "stall": "both cores are wall-heavy — this is a stall mirror, a long grind "
+             "won on chip, hazards and PP rather than a sweep",
+    # "sun":          "...both sides leaning on the sun...",
+    # "rain":         "...swift-swimmers under the rain...",
+    # "trick_room":   "...speed inverted, the slow bruisers move first...",
+    # "hyper_offense": "...screens and setup, every turn is tempo...",
+}
+
+
+def archetype_prose(label: str | None) -> str | None:
+    """The preview archetype call-out for a detected matchup mode, or None if
+    the mode is unknown/undetected. Extensible: one row per engine mode in
+    _ARCHETYPE_FRAME — the plumbing (label -> beat) is archetype-agnostic."""
+    return _ARCHETYPE_FRAME.get(label) if label else None
+
+
 _STATUS_INFLICT = {
     "frz": "froze {n} solid", "brn": "burned {n}", "par": "paralyzed {n}",
     "slp": "put {n} to sleep", "psn": "poisoned {n}",
@@ -1016,13 +1040,20 @@ class Director:
 
     # --- match framing -------------------------------------------------
     def match_start(self, opponent: str, our_team: list[str],
-                    their_team: list[str], lead: str | None = None) -> str:
+                    their_team: list[str], lead: str | None = None,
+                    archetype: str | None = None) -> str:
         self.reset()
         text = (f"[MATCH START] New battle vs {opponent or 'the opponent'}. "
                 f"Our team: {', '.join(our_team) or 'unknown'}. "
                 f"Their preview: {', '.join(their_team) or 'hidden'}.")
         if lead:
             text += f" We lead {lead}."
+        # engine-detected matchup archetype (stall mirror, sun, rain, ...):
+        # a preview read the desk calls and the gremlin reacts to. Byte-
+        # unchanged when no archetype is flagged.
+        frame = archetype_prose(archetype)
+        if frame:
+            text += f" The engine reads the matchup: {frame}."
         text += " Set the stage in a line or two."
         return text
 
