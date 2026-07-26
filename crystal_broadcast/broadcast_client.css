@@ -1,0 +1,102 @@
+/* Broadcast mode for the self-hosted Pokemon Showdown client.
+ *
+ * serve_client.py injects this (plus a small sizing script) when the client
+ * is requested as /broadcast-client.html. It is NOT part of the client fork:
+ * pokemon-showdown-client stays pristine so it updates with a plain git pull.
+ *
+ * Goal: leave ONLY the battle scene on screen. Everything else the client
+ * draws (room tabs, user bar, room list, battle log, chat input, controls)
+ * is either duplicated by our overlay or irrelevant to a broadcast.
+ *
+ * Selectors are from the client's own stylesheets:
+ *   .header      50px top bar, logo + room tabs      (style/client2.css:133)
+ *   .ps-room     panels, absolutely positioned below (style/client2.css:595)
+ *   .battle      the scene: FIXED 640x360 raster     (style/battle.css:10)
+ *   .battle-log  log column at left:640px            (style/battle.css:58)
+ */
+
+/* top bar: room tabs, logo, "Choose name", volume + settings */
+.header,
+.userbar {
+	display: none !important;
+}
+
+/* panels are pushed down by the header's 56px; reclaim it */
+.ps-room {
+	top: 0 !important;
+	border-left: 0 !important;
+	margin-left: 0 !important;
+	background: #000 !important;
+}
+
+/* the home panel (roomid "") = room list, user/battle counters, chat rooms.
+   Exact-id match, so battle rooms (#room-battle-gen9ou-NNNN) are untouched. */
+#room- {
+	display: none !important;
+}
+
+/* with the home panel gone the battle room owns the full frame — the client
+   splits the two side by side and leaves inline left/right on each */
+[id^="room-battle-"] {
+	left: 0 !important;
+	right: 0 !important;
+	width: auto !important;
+}
+
+/* Everything in the battle room except the scene. Class-based hiding is
+   fragile here because BattlePanel also renders a ChatPanel (the "2 users /
+   Battle options" row and "Choose a name before sending messages" both come
+   from panel-chat.js), so instead: drop every direct child that does not
+   contain the scene. Robust to whatever else the panel decides to render. */
+[id^="room-battle-"] > *:not(.battle):not(:has(.battle)) {
+	display: none !important;
+}
+
+/* The playback controls (Play / First turn / Skip to end / Switch viewpoint)
+   need naming explicitly: when chooseBattleLayout returns overlayControls,
+   they render INSIDE the scene wrapper, so the structural rule above — which
+   only drops children that don't contain .battle — keeps them. */
+.battle-controls,
+.battle-controls-container,
+.overlay-controls {
+	display: none !important;
+}
+
+/* the scene's wrapper is inline-styled by BattlePanel.render to the computed
+   battleWidth/battleHeight with `margin: 0 auto`; unpin it so the scene can
+   sit at the frame's top-left instead of centred under an 18px spacer */
+[id^="room-battle-"] > div:has(.battle) {
+	position: absolute !important;
+	top: 0 !important;
+	left: 0 !important;
+	width: 100% !important;
+	height: 100% !important;
+	margin: 0 !important;
+}
+
+/* The scene is a fixed 640x360 stage (16:9, conveniently). The client caps its
+   own scaling at 1x (client-main.js chooseBattleLayout: Math.min(1, w/640,
+   h/360)) — it only ever shrinks — so any broadcast-size upscale has to come
+   from here. !important is required: battle.js sets an inline
+   `transform: none` on the frame, which would otherwise win.
+   --battle-scale is set by the sizing script serve_client.py injects. */
+.battle {
+	top: 0 !important;
+	left: 0 !important;
+	border: 0 !important;
+	transform: scale(var(--battle-scale, 1)) !important;
+	transform-origin: top left !important;
+}
+
+/* Sprites are pixel art. At a ~3x broadcast upscale, bilinear smoothing turns
+   them to mush; nearest-neighbour keeps them crisp. Swap to `auto` if you
+   prefer the soft look. Text and HP bars are DOM, so they stay sharp either
+   way. */
+.battle img {
+	image-rendering: pixelated;
+}
+
+html, body, .ps-frame {
+	background: #000 !important;
+	overflow: hidden !important;
+}

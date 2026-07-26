@@ -34,17 +34,21 @@
   // ("IN FRAME / Please visit Showdown directly") and can never be composited
   // over. The new client does not framebust and loads no CDN scripts.
   //
-  // URL shape is testclient-new.html because it (a) sets Config.testclient,
-  // skipping the cross-domain storage handshake that requires a real https
-  // domain, (b) takes the sim server as ?~~host:port, and (c) hash-routes to
-  // the room, since PSRouter picks subscribeHash() when the path ends .html.
+  // /broadcast-client.html is serve_client.py serving testclient-new.html with
+  // broadcast_client.css injected (chrome stripped, scene scaled to fill). The
+  // testclient base is what (a) sets Config.testclient, skipping the
+  // cross-domain storage handshake that requires a real https domain, (b)
+  // takes the sim server as ?~~host:port, and (c) hash-routes to the room,
+  // since PSRouter picks subscribeHash() when the path ends .html.
+  // Pass ?chrome=1 to load the unstyled client instead (debugging).
   const qs = new URLSearchParams(location.search);
   const room = qs.get("battle");
   if (room) {
     const client = (qs.get("client") || "http://localhost:8127").replace(/\/$/, "");
     const sim = qs.get("sim") || "localhost:8000";
+    const page = qs.get("chrome") ? "/testclient-new.html" : "/broadcast-client.html";
     document.getElementById("battle").src =
-      client + "/testclient-new.html?~~" + sim + "#" + room;
+      client + page + "?~~" + sim + "#" + room;
     document.getElementById("hint").style.display = "none";
   }
 </script>

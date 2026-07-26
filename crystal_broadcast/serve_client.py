@@ -20,9 +20,19 @@ Routing: psim.us serves the client for ANY path (/battle-gen9ou-123 included)
 and the client reads the room out of the URL. A plain static server 404s those,
 so this one falls back to index-new.html for anything that isn't a real file.
 
+BROADCAST MODE: request /broadcast-client.html and you get testclient-new.html
+with broadcast_client.css and a sizing script injected, which strips the client
+down to just the battle scene. Injecting here (rather than editing the client)
+keeps the fork pristine, and sidesteps two problems: testclient-new.html
+rejects any query string that isn't `?~~host:port`, so a ?broadcast=1 flag is
+not available; and the page is cross-origin from broadcast.html on :8129, so
+it cannot be styled from there. The name still ends in .html, which is what
+makes PSRouter hash-route to the room.
+
 Run:  python showdown/serve_client.py [--port 8127] [--root <client dir>]
-The client's config/routes.json `client` field must match host:port, or
-Config.defaultserver won't apply and it'll try to reach sim3.psim.us.
+Requires `./build full` in pokemon-showdown-client — a plain `./build` leaves
+data/ empty, the client async-falls-back to the CDN for pokedex/graphics, and
+the battle panel throws in BattleScene before they land.
 """
 from __future__ import annotations
 
@@ -35,11 +45,55 @@ from pathlib import Path
 DEFAULT_ROOT = (Path.home() / "Developer/grimoire/pokemon-showdown-client"
                 / "play.pokemonshowdown.com")
 FALLBACK = "index-new.html"
+BROADCAST_PATH = "/broadcast-client.html"
+BROADCAST_CSS_PATH = "/broadcast-client.css"
+BROADCAST_SOURCE = "testclient-new.html"
+HERE = Path(__file__).parent
+
+# scale the fixed 640x360 scene to fill the frame; a CSS-only version isn't
+# possible because scale() needs a unitless number and calc() on vw yields a
+# length. Set as a custom property so the stylesheet owns the actual rule.
+SIZER = """
+<link rel="stylesheet" href="%s">
+<script>
+(function () {
+	function fit() {
+		var s = Math.min(window.innerWidth / 640, window.innerHeight / 360);
+		document.documentElement.style.setProperty('--battle-scale', s);
+	}
+	window.addEventListener('resize', fit);
+	fit();
+})();
+</script>
+""" % BROADCAST_CSS_PATH
 
 
 class ClientHandler(SimpleHTTPRequestHandler):
     """Static files, with an SPA-style fallback so room paths reach the
-    client instead of 404ing."""
+    client instead of 404ing, plus the injected broadcast entry point."""
+
+    def do_GET(self):
+        path = self.path.split("?", 1)[0].split("#", 1)[0]
+        if path == BROADCAST_CSS_PATH:
+            return self._send_bytes(
+                (HERE / "broadcast_client.css").read_bytes(), "text/css")
+        if path == BROADCAST_PATH:
+            return self._send_bytes(self._broadcast_html(), "text/html")
+        return super().do_GET()
+
+    def _broadcast_html(self) -> bytes:
+        src = (Path(self.directory) / BROADCAST_SOURCE).read_text()
+        if "</head>" not in src:
+            raise RuntimeError(f"no </head> in {BROADCAST_SOURCE}")
+        return src.replace("</head>", SIZER + "</head>", 1).encode()
+
+    def _send_bytes(self, body: bytes, ctype: str):
+        self.send_response(200)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
 
     def send_head(self):
         path = self.translate_path(self.path)
