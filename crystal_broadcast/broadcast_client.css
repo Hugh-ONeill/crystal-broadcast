@@ -79,12 +79,18 @@
    h/360)) — it only ever shrinks — so any broadcast-size upscale has to come
    from here. !important is required: battle.js sets an inline
    `transform: none` on the frame, which would otherwise win.
-   --battle-scale is set by the sizing script serve_client.py injects. */
+   --battle-scale/-x/-y are set by the sizing script serve_client.py injects.
+   The translate centres the letterbox: the scene is 16:9 and the frame rarely
+   is (a browser window loses height to tab and URL bars), so the fit leaves
+   slack, and with a top-left origin it would all pile up on one side. Order
+   matters — scale applies about the origin first, then translate moves the
+   scaled box in the parent's coordinate space. */
 .battle {
 	top: 0 !important;
 	left: 0 !important;
 	border: 0 !important;
-	transform: scale(var(--battle-scale, 1)) !important;
+	transform: translate(var(--battle-x, 0px), var(--battle-y, 0px))
+	           scale(var(--battle-scale, 1)) !important;
 	transform-origin: top left !important;
 }
 

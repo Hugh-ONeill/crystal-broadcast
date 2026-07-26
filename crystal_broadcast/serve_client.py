@@ -50,16 +50,23 @@ BROADCAST_CSS_PATH = "/broadcast-client.css"
 BROADCAST_SOURCE = "testclient-new.html"
 HERE = Path(__file__).parent
 
-# scale the fixed 640x360 scene to fill the frame; a CSS-only version isn't
-# possible because scale() needs a unitless number and calc() on vw yields a
-# length. Set as a custom property so the stylesheet owns the actual rule.
+# Scale the fixed 640x360 scene to fill the frame, and centre the leftover.
+# A CSS-only version isn't possible: scale() needs a unitless number and
+# calc() on vw yields a length. The scene is 16:9, so unless the frame is too
+# the fit letterboxes; with transform-origin at top-left all the slack would
+# otherwise pile up on one side. Set as custom properties so the stylesheet
+# owns the actual rule.
 SIZER = """
 <link rel="stylesheet" href="%s">
 <script>
 (function () {
 	function fit() {
-		var s = Math.min(window.innerWidth / 640, window.innerHeight / 360);
-		document.documentElement.style.setProperty('--battle-scale', s);
+		var w = window.innerWidth, h = window.innerHeight;
+		var s = Math.min(w / 640, h / 360);
+		var css = document.documentElement.style;
+		css.setProperty('--battle-scale', s);
+		css.setProperty('--battle-x', ((w - 640 * s) / 2) + 'px');
+		css.setProperty('--battle-y', ((h - 360 * s) / 2) + 'px');
 	}
 	window.addEventListener('resize', fit);
 	fit();
