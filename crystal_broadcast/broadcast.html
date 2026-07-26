@@ -20,16 +20,31 @@
 <body>
   <iframe id="battle" title="battle"></iframe>
   <iframe id="caption" src="/overlay.html" title="commentary"></iframe>
-  <div id="hint">Add <code>?battle=battle-gen9ou-NNNN</code> to the URL to load a match.</div>
+  <div id="hint">Add <code>?battle=battle-gen9ou-NNNN</code> to the URL to load a match.<br>
+    Needs the self-hosted client: <code>python showdown/serve_client.py</code></div>
 <script>
   // Single self-hosted page: the local Showdown battle embedded, with the
-  // Prism caption composited over it from the WS feed. No Showdown login,
-  // no server patch. Local-server only (psim.us forbids framing).
-  const room = new URLSearchParams(location.search).get("battle");
+  // commentary overlay composited over it from the WS feed. No Showdown
+  // login, no server patch.
+  //
+  // The battle iframe must point at the SELF-HOSTED client (serve_client.py,
+  // default :8127), NOT at the sim server on :8000. The sim server has no
+  // client of its own: its root is a stub that redirects to psim.us, which
+  // serves the OLD client, whose index-old.html framebusts
+  // ("IN FRAME / Please visit Showdown directly") and can never be composited
+  // over. The new client does not framebust and loads no CDN scripts.
+  //
+  // URL shape is testclient-new.html because it (a) sets Config.testclient,
+  // skipping the cross-domain storage handshake that requires a real https
+  // domain, (b) takes the sim server as ?~~host:port, and (c) hash-routes to
+  // the room, since PSRouter picks subscribeHash() when the path ends .html.
+  const qs = new URLSearchParams(location.search);
+  const room = qs.get("battle");
   if (room) {
-    const server = new URLSearchParams(location.search).get("server")
-                   || "http://localhost:8000";
-    document.getElementById("battle").src = server.replace(/\/$/, "") + "/" + room;
+    const client = (qs.get("client") || "http://localhost:8127").replace(/\/$/, "");
+    const sim = qs.get("sim") || "localhost:8000";
+    document.getElementById("battle").src =
+      client + "/testclient-new.html?~~" + sim + "#" + room;
     document.getElementById("hint").style.display = "none";
   }
 </script>
