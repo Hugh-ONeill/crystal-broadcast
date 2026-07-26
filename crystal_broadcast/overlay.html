@@ -2,163 +2,340 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Prism — Commentary Overlay</title>
+<title>PRISM + FRACTURE — Commentary Overlay</title>
 <style>
+  /* Broadcast overlay for the PRISM + FRACTURE duo. Reads the same feed as
+     overlay_kitty.py (commentary_overlay.py on ws://127.0.0.1:8130) and
+     renders the parts of it the Showdown frame CANNOT show: the desk read,
+     the duo exchange, and PRISM's citations.
+
+     Deliberately NOT shown: species names, HP bars, ball tracker. Those are
+     already on screen in the battle itself, and duplicating them wastes the
+     lower third. The feed still carries them (us/us_hp/them/them_hp/
+     us_alive/them_alive) for the kitty monitor.
+
+     Transparent background: composites over the battle either as an OBS
+     browser source or via broadcast.html. Self-contained, no external
+     requests. */
   :root {
-    --accent: #7cdcff;
-    --accent-2: #b18cff;
-    --bar-bg: rgba(12, 14, 22, 0.82);
+    --prism:   #7cdcff;   /* PRISM cyan   (ACCENT in overlay_kitty.py) */
+    --fracture:#78b4ff;   /* FRACTURE shard blue (SHARD) */
+    --violet:  #b18cff;
+    --green:   #7ee787;
+    --amber:   #ffcc66;
+    --red:     #ff6b6b;
+    --white:   #f2f5fb;
+    --dim:     #96a0b4;
+    --faint:   #5a6474;
+    --glass:   rgba(12, 14, 22, 0.82);
+    --hair:    rgba(255, 255, 255, 0.10);
+    --ease:    cubic-bezier(.2, .7, .2, 1);
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body {
     width: 100%; height: 100%;
-    background: transparent;           /* composites over the battle */
+    background: transparent;
     overflow: hidden;
     font-family: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
     -webkit-font-smoothing: antialiased;
   }
-  /* lower-third: pinned to the bottom, centered, generous side margins */
-  #wrap {
+  #stage {
     position: fixed;
-    left: 50%;
-    bottom: 28px;                      /* sits inside the lower-third strip */
+    left: 50%; bottom: 28px;
     transform: translateX(-50%);
     width: min(1180px, 88vw);
-    display: flex;
-    justify-content: center;
+    display: flex; flex-direction: column; align-items: stretch;
+    gap: 10px;
     pointer-events: none;
   }
-  #bar {
-    display: flex;
-    align-items: stretch;
-    width: 100%;
-    background: var(--bar-bg);
+
+  /* --- moment banner: transient punctuation (KO / Tera) ---------------- */
+  #moment {
+    align-self: center;
+    padding: 7px 22px;
+    border-radius: 999px;
+    background: var(--glass);
     backdrop-filter: blur(10px) saturate(1.1);
     -webkit-backdrop-filter: blur(10px) saturate(1.1);
-    border: 1px solid rgba(255, 255, 255, 0.10);
-    border-left: 4px solid var(--accent);
-    border-radius: 12px;
-    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45),
-                0 0 0 1px rgba(0, 0, 0, 0.3);
-    /* hidden state */
-    opacity: 0;
-    transform: translateY(26px);
-    transition: opacity .45s cubic-bezier(.2,.7,.2,1),
-                transform .45s cubic-bezier(.2,.7,.2,1);
+    border: 1px solid var(--hair);
+    font-size: 15px; font-weight: 800;
+    letter-spacing: .18em; text-transform: uppercase;
+    white-space: nowrap;
+    opacity: 0; transform: translateY(10px) scale(.96);
+    transition: opacity .35s var(--ease), transform .35s var(--ease);
   }
-  #bar.show { opacity: 1; transform: translateY(0); }
+  #moment.show { opacity: 1; transform: translateY(0) scale(1); }
+  #moment.ko   { color: var(--red);    box-shadow: 0 0 26px rgba(255,107,107,.28); }
+  #moment.tera { color: var(--violet); box-shadow: 0 0 26px rgba(177,140,255,.28); }
 
-  .tag {
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    padding: 0 20px 0 22px;
-    border-right: 1px solid rgba(255, 255, 255, 0.08);
-    min-width: 128px;
+  /* --- desk pill: the MCTS read. Persistent — this is live state, not
+         speech, and it is the one graphic the battle frame cannot show. --- */
+  #desk {
+    align-self: center;
+    display: flex; align-items: center; gap: 14px;
+    padding: 8px 18px;
+    background: var(--glass);
+    backdrop-filter: blur(10px) saturate(1.1);
+    -webkit-backdrop-filter: blur(10px) saturate(1.1);
+    border: 1px solid var(--hair);
+    border-radius: 999px;
+    box-shadow: 0 8px 28px rgba(0, 0, 0, .40);
+    opacity: 0; transition: opacity .4s var(--ease);
   }
-  .tag .name {
-    font-weight: 800;
-    font-size: 21px;
-    letter-spacing: .12em;
-    text-transform: uppercase;
-    background: linear-gradient(90deg, var(--accent), var(--accent-2));
-    -webkit-background-clip: text;
-    background-clip: text;
-    color: transparent;
-    display: flex; align-items: center; gap: 8px;
+  #desk.show { opacity: 1; }
+  #desk .cap {
+    font-size: 11px; font-weight: 700; letter-spacing: .22em;
+    text-transform: uppercase; color: var(--faint);
   }
-  .tag .name::before {
-    content: "◆";
-    -webkit-text-fill-color: var(--accent);
-    font-size: 15px;
+  /* centre-origin eval bar: fill runs from dead-even toward whoever leads */
+  #track {
+    position: relative;
+    width: 230px; height: 6px;
+    background: rgba(255, 255, 255, .08);
+    border-radius: 3px;
   }
-  .tag .role {
-    font-size: 11px;
-    letter-spacing: .2em;
-    text-transform: uppercase;
-    color: rgba(255, 255, 255, 0.42);
-    margin-top: 3px;
+  #track::after {                       /* dead-even tick */
+    content: ""; position: absolute; left: 50%; top: -3px;
+    width: 1px; height: 12px; background: var(--faint);
   }
-
-  .body {
-    display: flex;
-    align-items: center;
-    padding: 18px 26px 18px 24px;
-    flex: 1;
+  #fill {
+    position: absolute; top: 0; height: 100%;
+    border-radius: 3px;
+    left: 50%; width: 0;
+    transition: left .65s var(--ease), width .65s var(--ease),
+                background .65s var(--ease);
+  }
+  #marker {
+    position: absolute; top: 50%;
+    width: 11px; height: 11px; margin: -5.5px 0 0 -5.5px;
+    border-radius: 50%;
+    left: 50%;
+    box-shadow: 0 0 12px currentColor;
+    background: currentColor;
+    transition: left .65s var(--ease), color .65s var(--ease);
+  }
+  #readlbl {
+    font-size: 13px; color: var(--dim);
+    min-width: 108px; white-space: nowrap;
   }
   #turn {
-    align-self: flex-start;
-    margin: 3px 16px 0 0;
-    font-size: 12px;
-    font-weight: 700;
-    letter-spacing: .08em;
-    color: rgba(124, 220, 255, 0.85);
+    font-size: 12px; font-weight: 700; letter-spacing: .08em;
+    color: var(--violet); white-space: nowrap;
+  }
+  #live { font-size: 11px; color: var(--faint); white-space: nowrap; }
+  #live.on { color: var(--green); }
+
+  /* --- caption card: the duo exchange + sources footer ------------------ */
+  #card {
+    background: var(--glass);
+    backdrop-filter: blur(10px) saturate(1.1);
+    -webkit-backdrop-filter: blur(10px) saturate(1.1);
+    border: 1px solid var(--hair);
+    border-left: 4px solid var(--prism);
+    border-radius: 12px;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, .45), 0 0 0 1px rgba(0, 0, 0, .3);
+    padding: 16px 24px;
+    opacity: 0; transform: translateY(26px);
+    transition: opacity .45s var(--ease), transform .45s var(--ease),
+                border-left-color .45s var(--ease);
+  }
+  #card.show { opacity: 1; transform: translateY(0); }
+
+  #exchange { display: flex; flex-direction: column; gap: 9px; }
+  .entry { display: flex; align-items: baseline; gap: 12px; }
+  .entry .who {
+    flex: 0 0 auto;
+    font-weight: 800; letter-spacing: .12em; text-transform: uppercase;
     white-space: nowrap;
+    display: flex; align-items: baseline; gap: 6px;
   }
-  #line {
-    color: #f2f5fb;
-    font-size: 27px;
-    line-height: 1.34;
-    font-weight: 500;
-    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
-    /* clamp so a runaway line never blows up the bar height */
-    display: -webkit-box;
-    -webkit-line-clamp: 3;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
+  .entry .who::before { font-size: .78em; }
+  .entry.prism    .who { color: var(--prism); }
+  .entry.prism    .who::before { content: "\25C6"; }   /* diamond */
+  .entry.fracture .who { color: var(--fracture); }
+  .entry.fracture .who::before { content: "\2726"; }   /* shard */
+  .entry .said {
+    /* clamp so a runaway line never blows the card up */
+    display: -webkit-box; -webkit-box-orient: vertical; overflow: hidden;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, .5);
   }
-  /* text swap animation */
-  #line.swap { animation: rise .4s cubic-bezier(.2,.7,.2,1); }
+  /* recency ramp: newest bright and large, the previous one dim, older
+     faded but still legible during a fast exchange */
+  .entry.d0 .who  { font-size: 19px; }
+  .entry.d0 .said { font-size: 26px; line-height: 1.32; color: var(--white);
+                    font-weight: 500; -webkit-line-clamp: 3; }
+  .entry.d1 .who  { font-size: 15px; }
+  .entry.d1 .said { font-size: 19px; line-height: 1.3; color: var(--dim);
+                    -webkit-line-clamp: 2; }
+  .entry.d2 .who, .entry.d3 .who  { font-size: 13px; opacity: .75; }
+  .entry.d2 .said, .entry.d3 .said { font-size: 16px; line-height: 1.28;
+                                     color: var(--faint);
+                                     -webkit-line-clamp: 1; }
+  .entry.fresh { animation: rise .4s var(--ease); }
   @keyframes rise {
     from { opacity: 0; transform: translateY(8px); }
     to   { opacity: 1; transform: translateY(0); }
   }
 
+  #sources {
+    display: none;
+    margin-top: 14px; padding-top: 11px;
+    border-top: 1px solid var(--hair);
+    gap: 18px; flex-wrap: wrap;
+    font-size: 13px;
+  }
+  #sources.show { display: flex; }
+  #sources .cap {
+    font-size: 10px; font-weight: 700; letter-spacing: .22em;
+    text-transform: uppercase; color: var(--faint); align-self: center;
+  }
+  .cite { color: var(--white); white-space: nowrap; }
+  .cite::before { content: "\25C7"; color: var(--prism); margin-right: 7px; }
+  .cite .corpus { color: var(--dim); }
+  .cite .corpus::before { content: "\00B7"; margin: 0 6px; }
+
   #status {
     position: fixed; left: 10px; bottom: 8px;
-    font-size: 11px; color: rgba(255,255,255,.3);
-    font-family: monospace; pointer-events: none;
+    font-size: 11px; color: rgba(255, 255, 255, .3);
+    font-family: ui-monospace, monospace; pointer-events: none;
     opacity: 0; transition: opacity .3s;
   }
   #status.warn { opacity: 1; color: rgba(255, 170, 120, .8); }
 </style>
 </head>
 <body>
-  <div id="wrap">
-    <div id="bar">
-      <div class="tag">
-        <div class="name">Prism</div>
-        <div class="role">Analyst</div>
-      </div>
-      <div class="body">
-        <div id="turn"></div>
-        <div id="line"></div>
-      </div>
+  <div id="stage">
+    <div id="moment"></div>
+    <div id="desk">
+      <span class="cap">Desk</span>
+      <div id="track"><div id="fill"></div><div id="marker"></div></div>
+      <span id="readlbl"></span>
+      <span id="turn"></span>
+      <span id="live">&#9679;</span>
+    </div>
+    <div id="card">
+      <div id="exchange"></div>
+      <div id="sources"></div>
     </div>
   </div>
-  <div id="status">connecting…</div>
+  <div id="status">connecting&hellip;</div>
 
 <script>
-  const WS_URL = "ws://127.0.0.1:8130/";
-  const HIDE_AFTER_MS = 14000;   // fade the bar out after this much quiet
+  "use strict";
+  const WS_URL       = "ws://127.0.0.1:8130/";
+  const MAX_HISTORY  = 4;      // matches overlay_kitty.py
+  const HIDE_AFTER   = 20000;  // fade the caption card after this much quiet
+  const MOMENT_MS    = 6000;   // KO/Tera banner is punctuation, not state
 
-  const bar = document.getElementById("bar");
-  const lineEl = document.getElementById("line");
-  const turnEl = document.getElementById("turn");
-  const statusEl = document.getElementById("status");
-  let hideTimer = null;
+  // spoken desk-read phrase -> compact meter label (substring match).
+  // Kept in sync with _READ_LABELS in overlay_kitty.py.
+  const READ_LABELS = [
+    ["all but sealed", "all but sealed"], ["clearly ahead", "clearly ahead"],
+    ["real edge", "real edge"],           ["dead even", "dead even"],
+    ["behind in this", "behind"],         ["deep trouble", "deep trouble"],
+    ["nearly gone", "nearly gone"],
+  ];
 
-  function show(text, turn) {
+  const $ = (id) => document.getElementById(id);
+  const card = $("card"), exchange = $("exchange"), sources = $("sources");
+  const desk = $("desk"), fill = $("fill"), marker = $("marker");
+  const readlbl = $("readlbl"), turnEl = $("turn"), liveEl = $("live");
+  const momentEl = $("moment"), statusEl = $("status");
+
+  let history = [];            // [persona, text] — newest last
+  let hideTimer = null, momentTimer = null, lastMoment = null;
+
+  function personaClass(p) {
+    return (p || "").toUpperCase() === "FRACTURE" ? "fracture" : "prism";
+  }
+
+  function renderExchange(freshest) {
+    exchange.textContent = "";
+    history.forEach(([persona, text], i) => {
+      const depth = history.length - 1 - i;      // 0 == newest
+      const row = document.createElement("div");
+      row.className = `entry ${personaClass(persona)} d${Math.min(depth, 3)}`;
+      if (depth === 0 && freshest) row.classList.add("fresh");
+      if (persona) {
+        const who = document.createElement("span");
+        who.className = "who";
+        who.textContent = persona;
+        row.appendChild(who);
+      }
+      const said = document.createElement("span");
+      said.className = "said";
+      said.textContent = text;
+      row.appendChild(said);
+      exchange.appendChild(row);
+    });
+    // the card's accent edge follows whoever is speaking now
+    const newest = history[history.length - 1];
+    card.style.borderLeftColor = newest && personaClass(newest[0]) === "fracture"
+      ? "var(--fracture)" : "var(--prism)";
+  }
+
+  function pushLine(persona, text) {
     if (!text) return;
-    turnEl.textContent = (turn !== null && turn !== undefined) ? ("T" + turn) : "";
-    lineEl.textContent = text;
-    // retrigger the rise animation
-    lineEl.classList.remove("swap");
-    void lineEl.offsetWidth;
-    lineEl.classList.add("swap");
-    bar.classList.add("show");
+    const last = history[history.length - 1];
+    if (last && last[0] === persona && last[1] === text) return;  // dedupe
+    history.push([persona, text]);
+    if (history.length > MAX_HISTORY) history = history.slice(-MAX_HISTORY);
+    renderExchange(true);
+    card.classList.add("show");
     clearTimeout(hideTimer);
-    hideTimer = setTimeout(() => bar.classList.remove("show"), HIDE_AFTER_MS);
+    hideTimer = setTimeout(() => card.classList.remove("show"), HIDE_AFTER);
+  }
+
+  function setDesk(d) {
+    const mom = (typeof d.mom === "number") ? Math.max(0, Math.min(1, d.mom))
+                                            : null;
+    if (mom === null) return;                 // nothing to show until a read
+    desk.classList.add("show");
+    const pct = mom * 100;
+    const colour = mom >= 0.5 ? "var(--green)" : "var(--red)";
+    fill.style.left = Math.min(pct, 50) + "%";
+    fill.style.width = Math.abs(pct - 50) + "%";
+    fill.style.background = colour;
+    marker.style.left = pct + "%";
+    marker.style.color = colour;
+
+    const read = (d.read || "").split(",")[0].trim();
+    const hit = READ_LABELS.find(([key]) => read.toLowerCase().includes(key));
+    readlbl.textContent = hit ? hit[1] : read.slice(0, 24);
+    turnEl.textContent = (d.turn !== null && d.turn !== undefined)
+      ? "T" + d.turn : "";
+  }
+
+  function setMoment(m) {
+    if (!m || m === lastMoment) return;       // fire once per new moment
+    lastMoment = m;
+    momentEl.textContent = m;
+    momentEl.className = m.startsWith("KNOCK") ? "ko show" : "tera show";
+    clearTimeout(momentTimer);
+    momentTimer = setTimeout(() => momentEl.classList.remove("show"),
+                             MOMENT_MS);
+  }
+
+  function setSources(cites) {
+    sources.textContent = "";
+    if (!cites || !cites.length) { sources.classList.remove("show"); return; }
+    const cap = document.createElement("span");
+    cap.className = "cap";
+    cap.textContent = "Sources";
+    sources.appendChild(cap);
+    cites.slice(0, 3).forEach((c) => {
+      const el = document.createElement("span");
+      el.className = "cite";
+      el.textContent = c.label || "?";
+      if (c.corpus) {
+        const corp = document.createElement("span");
+        corp.className = "corpus";
+        corp.textContent = c.corpus;
+        el.appendChild(corp);
+      }
+      sources.appendChild(el);
+    });
+    sources.classList.add("show");
   }
 
   function setStatus(msg, warn) {
@@ -166,20 +343,24 @@
     statusEl.classList.toggle("warn", !!warn);
   }
 
+  function setLive(on) { liveEl.classList.toggle("on", !!on); }
+
   let backoff = 500;
   function connect() {
     let ws;
     try { ws = new WebSocket(WS_URL); }
     catch (e) { return retry(); }
 
-    ws.onopen = () => { backoff = 500; setStatus("", false); };
+    ws.onopen = () => { backoff = 500; setStatus("", false); setLive(true); };
     ws.onmessage = (ev) => {
-      try {
-        const d = JSON.parse(ev.data);
-        show(d.text, d.turn);
-      } catch (e) { /* ignore malformed */ }
+      let d;
+      try { d = JSON.parse(ev.data); } catch (e) { return; }
+      setDesk(d);
+      setMoment(d.moment);
+      setSources(d.citations);
+      pushLine(d.persona, d.text);
     };
-    ws.onclose = () => retry();
+    ws.onclose = () => { setLive(false); retry(); };
     ws.onerror = () => { try { ws.close(); } catch (e) {} };
   }
   function retry() {
@@ -187,7 +368,23 @@
     setTimeout(connect, backoff);
     backoff = Math.min(backoff * 2, 5000);
   }
-  connect();
+
+  // ?demo=1 renders a representative frame with no feed, for layout work
+  // and for checking the composite in OBS before a match is running.
+  if (new URLSearchParams(location.search).get("demo")) {
+    setDesk({ mom: 0.62, read: "we hold a real edge", turn: 27 });
+    setMoment("KNOCKOUT · Moltres");
+    setSources([{ label: "Rapid Spin", corpus: "Bulbapedia" },
+                { label: "Good as Gold", corpus: "Bulbapedia" }]);
+    [["PRISM", "Two turns ago we committed the hazards."],
+     ["FRACTURE", "I have been screaming about this exact line."],
+     ["FRACTURE", "MY spin read!"],
+     ["PRISM", "The Rapid Spin did nothing to Gholdengo."]]
+      .forEach(([p, t]) => pushLine(p, t));
+    setLive(true);
+  } else {
+    connect();
+  }
 </script>
 </body>
 </html>

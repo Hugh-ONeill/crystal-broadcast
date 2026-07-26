@@ -12,11 +12,24 @@ Two local endpoints:
   * ws://127.0.0.1:8130/            -> pushes {"turn", "text", "persona",
                                        ...hud} per new line
 
-Two ways to display it, both fed from here:
-  * overlay_kitty.sh  — a tiled kitty panel (recommended on this Hyprland
-    setup; WebKitGTK crashes here). Reads the WS feed directly.
+Two views on the same feed, with different jobs:
+  * overlay.html      — THE BROADCAST PATH. Transparent lower-third meant to
+    composite over the battle, either as an OBS browser source or via
+    broadcast.html. Renders only what the Showdown frame CANNOT show: the
+    desk read, the duo exchange, PRISM's citations. Deliberately omits
+    species/HP/ball-tracker (already on screen in the battle itself) even
+    though the payload still carries them.
+  * overlay_kitty.sh  — a tiled kitty panel, now a LOCAL MONITOR rather than
+    the broadcast view: it tells you the stack is alive while a match runs.
+    Renders the full HUD including species/HP. Deliberately NOT held at
+    feature parity with overlay.html — new broadcast graphics (citation
+    chips, transitions, last-action strip) go to the web view only, so a
+    feature costs one implementation instead of two.
   * broadcast.html    — a single browser page that iframes the local battle
-    with the caption composited on top (local-server only).
+    with overlay.html composited on top (local-server only). Note the battle
+    iframe is cross-origin (:8000 vs :8129), so its DOM cannot be styled from
+    here; hiding Showdown's chrome needs OBS custom CSS or a client-side
+    broadcast mode in the fork.
 
 Run:  python showdown/commentary_overlay.py [--source ws://127.0.0.1:8131]
       (--source ws://127.0.0.1:6121/ws subscribes to real AIRI instead)
