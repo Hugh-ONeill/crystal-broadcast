@@ -32,6 +32,7 @@ import asyncio
 import json
 import signal
 import sys
+import time
 import urllib.error
 import urllib.request
 from collections import deque
@@ -206,9 +207,21 @@ def _speakers(beats: list[dict], text: str) -> list[str]:
 class Caster:
     def __init__(self, upstream: str, model: str,
                  grudge_path: str | None = None,
-                 expert_url: str | None = DEFAULT_EXPERT):
+                 expert_url: str | None = DEFAULT_EXPERT,
+                 speech_budget: float | None = None,
+                 duration_fn=None):
         self.upstream = upstream
         self.model = model
+        # Speech pacing, both off by default so behaviour is unchanged until a
+        # speech layer exists. duration_fn(persona, line) -> seconds is the only
+        # contract the TTS side has to meet; it is called ON THE EVENT LOOP, so
+        # a synth that runs in a thread should return an already-known duration
+        # (the wav length, or the 12Hz codec frame count) rather than block.
+        # speech_budget is the per-beat wall-clock allowance, i.e. the beat
+        # floor, and gates the SECOND voice of a handoff pair only: the first
+        # speaker always gets to finish, since silence is worse than overrun.
+        self.speech_budget = speech_budget
+        self.duration_fn = duration_fn
         self.prompts = {p: (PERSONA_DIR / f).read_text()
                         for p, f in _PERSONA_FILE.items()}
         self.grudges = GrudgeLedger.load(grudge_path)
@@ -221,6 +234,19 @@ class Caster:
         # cold in-game round-trips it's supposed to?
         self._fact_stats: dict = {}
         self._reset_fact_stats()
+        # per-match pacing instrument (reset at MATCH START, logged at RESULT).
+        # skip-don't-queue has never been measured: nothing records how old a
+        # beat is by the time it is voiced, nor how many are dropped unspoken to
+        # keep up. Both are invisible today because publishing text is instant,
+        # and both start mattering the moment speech makes a beat occupy real
+        # wall-clock time. Instrument first, so the speech work has a before.
+        self._pace_stats: dict = {}
+        self._reset_pace_stats()
+        # monotonic deadline for when queued speech finishes. EVENT LOOP ONLY:
+        # the 2026-07-25 freeze was a worker thread racing shared caster state,
+        # so a threaded synth layer must marshal back (call_soon_threadsafe)
+        # rather than touch this directly.
+        self._speaking_until: float = 0.0
         self.transcript: deque = deque(maxlen=12)
         # FRACTURE's deep-think stall lines THIS match — she fixates on one
         # image ("threading a needle") and reuses it; the shared transcript
@@ -236,6 +262,61 @@ class Caster:
         self._wake = asyncio.Event()
 
     # --- grounded facts (PRISM only) -----------------------------------
+    def _speech_seconds(self, persona: str, line: str) -> float | None:
+        """How long this line will occupy once voiced, or None when no speech
+        layer is wired (which leaves pacing exactly as it is today). Deliberately
+        NOT estimated from character count: PRISM runs a slowed paperwork cadence
+        and FRACTURE is a motormouth, so the same text is a different duration in
+        each voice and a length heuristic would be mistuned for one of them by
+        construction. The synth knows the real number."""
+        if self.duration_fn is None:
+            return None
+        try:
+            secs = float(self.duration_fn(persona, line))
+        except Exception as e:  # noqa: BLE001
+            print(f"caster: duration_fn failed for {persona}: {e!r}", flush=True)
+            return None
+        return secs if secs > 0 else None
+
+    def _reset_pace_stats(self):
+        """Zero the per-match pacing counters (call at MATCH START)."""
+        self._pace_stats = {"voiced": 0, "dropped": 0, "stale_ms": [],
+                            "turnaround_ms": [], "speech_s": [],
+                            "preflight_drops": 0, "overruns": 0}
+
+    def _speaking_backlog(self) -> float:
+        """Seconds of queued speech still to play. 0.0 with no speech layer."""
+        return max(0.0, self._speaking_until - time.monotonic())
+
+    def _log_pace_summary(self):
+        """One-line per-match pacing report, the counterpart to the RAG one.
+        The number that matters is beat age at voicing: how stale the thing
+        being said is by the time it is said. Dropped counts beats discarded
+        unspoken by skip-don't-queue, which is the price paid for that
+        freshness, and the two only trade against each other once speech
+        occupies wall-clock time."""
+        s = self._pace_stats
+        if not s["voiced"]:
+            return
+
+        def pct(vals, p):
+            if not vals:
+                return 0.0
+            ordered = sorted(vals)
+            return ordered[min(len(ordered) - 1, int(p * len(ordered)))]
+
+        stale, turn = s["stale_ms"], s["turnaround_ms"]
+        msg = (f"caster: pacing this match — voiced {s['voiced']}; dropped "
+               f"{s['dropped']} unspoken; beat age at voicing median "
+               f"{pct(stale, 0.5):.0f}ms / p90 {pct(stale, 0.9):.0f}ms / max "
+               f"{max(stale) if stale else 0:.0f}ms; generation median "
+               f"{pct(turn, 0.5):.0f}ms / p90 {pct(turn, 0.9):.0f}ms")
+        if s["speech_s"]:
+            msg += (f"; speech median {pct(s['speech_s'], 0.5):.2f}s / max "
+                    f"{max(s['speech_s']):.2f}s; budget overruns "
+                    f"{s['overruns']}; preflight drops {s['preflight_drops']}")
+        print(msg, flush=True)
+
     def _reset_fact_stats(self):
         """Zero the per-match RAG counters (call at MATCH START)."""
         self._fact_stats = {"warmed": 0, "injected": 0, "beats_with_facts": 0,
@@ -398,13 +479,15 @@ class Caster:
                         continue
                     item = {"text": text,
                             "beats": data.get("beats") or [],
-                            "hud": data.get("hud")}
+                            "hud": data.get("hud"),
+                            "_queued": time.monotonic()}
                     if text.startswith("[MATCH START]"):
                         # fresh match: reset the RAG instrument and warm the
                         # fact cache from the preview blob (own + predicted
                         # opponent paste) off the event loop, so the first
                         # in-battle narration of each mechanic is a cache hit
                         self._reset_fact_stats()
+                        self._reset_pace_stats()
                         blob = data.get("preview_text")
                         if blob and self.expert_url:
                             self._warm_task = asyncio.create_task(
@@ -413,6 +496,9 @@ class Caster:
                             or text.startswith("[RESULT]")):
                         self._pending_framing.append(item)
                     else:
+                        if self._pending_turn is not None:
+                            # the cost side of skip-don't-queue, now counted
+                            self._pace_stats["dropped"] += 1
                         self._pending_turn = item  # replace unspoken older
                     self._wake.set()
         finally:
@@ -613,6 +699,14 @@ class Caster:
             self._match_stalls.clear()
         if item["text"].startswith("[RESULT]"):
             self._log_fact_summary()
+            self._log_pace_summary()
+        started = time.monotonic()
+        if item.get("_queued") is not None:
+            # how stale this beat is at the moment it starts being said
+            self._pace_stats["stale_ms"].append(
+                1000 * (started - item["_queued"]))
+        self._pace_stats["voiced"] += 1
+        spent = 0.0        # speech seconds committed by this beat
         speakers = _speakers(item["beats"], item["text"])
         deliberating = any(b.get("beat") == "deep_think"
                            for b in item.get("beats") or [])
@@ -624,7 +718,21 @@ class Caster:
             item["_facts"] = await asyncio.to_thread(
                 self._gather_facts, item["text"],
                 [a for a in abilities if a])
-        for persona in speakers:
+        for idx, persona in enumerate(speakers):
+            # Dual-beat pre-flight: a handoff pair is two utterances back to
+            # back, so it can outlast the beat floor and push every later beat
+            # late. The first voice always speaks (silence is worse than
+            # overrun); the second is gated below, once its real length is
+            # known. This cheap check only skips a generation that cannot
+            # possibly fit. Both are inert without a duration source, so
+            # text-only pacing is byte-for-byte unchanged.
+            if (idx and self.speech_budget is not None
+                    and spent >= self.speech_budget):
+                self._pace_stats["preflight_drops"] += 1
+                print(f"caster: pre-flight dropped {persona} — {spent:.2f}s "
+                      f"already fills the {self.speech_budget:.1f}s budget",
+                      flush=True)
+                break
             try:
                 raw = await asyncio.to_thread(self._generate_sync,
                                               persona, item)
@@ -728,6 +836,25 @@ class Caster:
                 print(f"caster: {persona} line sanitized to empty, "
                       f"dropped: {raw[:90]!r}", flush=True)
                 continue
+            secs = self._speech_seconds(persona, line)
+            # The real pre-flight: only now is this line's true length known,
+            # so gate on what it WOULD cost rather than on what is already
+            # spent. Checking "budget already exhausted" instead lets a pair
+            # sail past the floor whenever the first voice fits on its own,
+            # which is the common case and the one worth catching.
+            #
+            # This MUST run before any state below it. A dropped line has to
+            # leave no trace: the duo transcript is shared so the other voice
+            # can answer it, and a correction that never aired would otherwise
+            # get answered on air next beat. Same for the stall ledger, which
+            # would burn a metaphor FRACTURE never actually said.
+            if (idx and secs is not None and self.speech_budget is not None
+                    and spent + secs > self.speech_budget):
+                self._pace_stats["preflight_drops"] += 1
+                print(f"caster: pre-flight dropped {persona} — {spent:.2f}s + "
+                      f"{secs:.2f}s exceeds the {self.speech_budget:.1f}s "
+                      f"budget", flush=True)
+                break
             self.transcript.append((persona, line))
             if deliberating and persona == "FRACTURE":
                 self._match_stalls.append(line)
@@ -741,6 +868,18 @@ class Caster:
                              if name in low or cite["label"].lower() in low]
             await self.publish(item["text"], persona, line, item["hud"],
                                citations)
+            if secs is not None:
+                spent += secs
+                self._pace_stats["speech_s"].append(secs)
+                # queue behind whatever is still playing, so the deadline is
+                # when THIS line finishes, not when it was handed over
+                self._speaking_until = max(self._speaking_until,
+                                           time.monotonic()) + secs
+
+        self._pace_stats["turnaround_ms"].append(
+            1000 * (time.monotonic() - started))
+        if self.speech_budget is not None and spent > self.speech_budget:
+            self._pace_stats["overruns"] += 1
 
     async def worker(self):
         while True:
@@ -763,13 +902,19 @@ async def main():
     ap.add_argument("--grudges", default=str(DEFAULT_GRUDGES),
                     help="grudge-ledger JSON (FRACTURE's Book of Grudges); "
                          "absent = no grudges, graceful")
+    ap.add_argument("--speech-budget", type=float, default=None,
+                    metavar="SECONDS",
+                    help="per-beat wall-clock speech allowance (the beat "
+                         "floor). Gates the second voice of a handoff pair. "
+                         "Inert until a speech layer supplies durations")
     ap.add_argument("--expert", default=DEFAULT_EXPERT,
                     help="grounded-rag /retrieve base URL for PRISM's fact "
                          "injection ('off' disables)")
     args = ap.parse_args()
 
     caster = Caster(args.upstream, args.model, grudge_path=args.grudges,
-                    expert_url=None if args.expert == "off" else args.expert)
+                    expert_url=None if args.expert == "off" else args.expert,
+                    speech_budget=args.speech_budget)
     if caster.grudges.ledger:
         print(f"caster: loaded {len(caster.grudges.ledger)} grudges "
               f"from {args.grudges}", flush=True)
@@ -795,6 +940,9 @@ async def main():
         await stop.wait()
         if any(caster._fact_stats.values()):
             caster._log_fact_summary()
+        # same reason: a timed-out match never emits [RESULT], and the pacing
+        # numbers are the point of running it
+        caster._log_pace_summary()
         worker.cancel()
 
 
