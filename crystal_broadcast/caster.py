@@ -580,6 +580,19 @@ class Caster:
             direction += (f" You have ALREADY used these stalls this match: "
                           f"{used}. Invent a totally different image — reuse "
                           "none of their metaphors or wording.")
+        # Who is ACTUALLY on the field. Without this the model reaches into
+        # the duo transcript for a name and reuses a mon that is long gone:
+        # measured live 2026-07-27, both voices kept calling the opposing
+        # active "Gholdengo" — OUR mon, fainted many turns earlier — while
+        # their Great Tusk was in.
+        hud = item.get("hud") or {}
+        if hud.get("us") or hud.get("them"):
+            ours = hud.get("us") or "unknown"
+            theirs = hud.get("them") or "unknown"
+            direction += (f" ON THE FIELD RIGHT NOW: ours is {ours}, theirs "
+                          f"is {theirs}. Those are the only two Pokemon in "
+                          f"play — never describe any other mon as active, "
+                          f"and never attribute this turn's actions to one.")
         direction += (" One or two short spoken sentences, react now. "
                       "Output only the line itself.")
         if nudge:
@@ -719,6 +732,7 @@ class Caster:
         if item["text"].startswith("[RESULT]"):
             self._log_fact_summary()
             self._log_pace_summary()
+        print(f"BEAT: {item['text']}", flush=True)
         started = time.monotonic()
         if item.get("_queued") is not None:
             # how stale this beat is at the moment it starts being said

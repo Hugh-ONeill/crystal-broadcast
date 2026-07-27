@@ -643,3 +643,32 @@ def test_move_and_item_status_causes_keep_the_active_voice():
     prose = [e.prose for e in evs if e.type == "status_applied"]
     assert any(p.startswith("Toxic ") for p in prose)
     assert any(p.startswith("Toxic Orb ") for p in prose)
+
+
+def test_move_hit_names_its_target():
+    """Regression (live 2026-07-27): the hit prose stated a mover and an
+    effect but no victim, so FRACTURE turned 'Great Tusk's Ice Spinner landed
+    super effective and a devastating blow' into 'I land a massive Ice
+    Spinner' — claiming a hit she had TAKEN. The ko branch always named its
+    target; hits now do too."""
+    sc = ProtocolScanner()
+    evs = sc.scan([
+        ["", "move", "p2a: Great Tusk", "Ice Spinner", "p1a: Gliscor"],
+        ["", "-supereffective", "p1a: Gliscor"],
+        ["", "-damage", "p1a: Gliscor", "39/100"],
+        ["", "move", "p1a: Gliscor", "Toxic", "p2a: Great Tusk"],
+    ], role="p1")
+    hits = [e for e in evs if e.type == "move_hit"]
+    assert len(hits) == 1
+    assert "on Gliscor" in hits[0].prose
+    assert hits[0].side == "us"          # we TOOK it
+
+
+def test_self_targeted_move_does_not_say_on_itself():
+    sc = ProtocolScanner()
+    evs = sc.scan([
+        ["", "move", "p1a: Gliscor", "Swords Dance", "p1a: Gliscor"],
+        ["", "-boost", "p1a: Gliscor", "atk", "2"],
+    ], role="p1")
+    for e in evs:
+        assert " on Gliscor" not in e.prose

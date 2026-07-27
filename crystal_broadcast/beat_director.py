@@ -570,8 +570,20 @@ class ProtocolScanner:
                 notable = (cur.get("crit")
                            or cur.get("effect") == "super effective"
                            or (dmg is not None and dmg >= 0.5))
+                # name the TARGET. Without it the prose states a mover and an
+                # effect but no victim ("Great Tusk's Ice Spinner landed super
+                # effective and a devastating blow"), and the caster fills the
+                # gap with whoever it assumes: measured live 2026-07-27,
+                # FRACTURE turned exactly that beat into "I land a massive Ice
+                # Spinner", claiming a hit she had actually TAKEN. The ko
+                # branch above has always named its target; this is the same
+                # rule. Self-targeted moves read oddly with "on X", so skip it
+                # when mover and target are the same mon.
+                hit = f"{head} landed {_join_phrases(tags)}"
+                if target_disp and target_disp != mover_disp:
+                    hit += f" on {target_disp}"
                 out.append(Event(
-                    "move_hit", f"{head} landed {_join_phrases(tags)}",
+                    "move_hit", hit,
                     side=target_side, notable=bool(notable),
                     data={"mover": cur["mover"], "move": cur["move"],
                           "target": cur["target"],

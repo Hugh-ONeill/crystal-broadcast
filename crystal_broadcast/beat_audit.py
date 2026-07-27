@@ -40,10 +40,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from showdown.beat_director import ProtocolScanner, classify  # noqa: E402
 
 
-def lines_from_clock(path: Path) -> list[str]:
+def lines_from_clock(path: Path, battle: str | None = None) -> list[str]:
     """Protocol lines in arrival order. 'queued' is when the line reached the
     client, so it preserves server order; 'presented' would be animation order
-    and is deduplicated differently."""
+    and is deduplicated differently.
+
+    A long-lived collector logs SEVERAL battles to one file, so without a
+    battle filter the turns of two games interleave and the audit is
+    nonsense. Defaults to the LAST battle seen."""
     out = []
     for raw in path.read_text().splitlines():
         if not raw.strip():
@@ -53,8 +57,11 @@ def lines_from_clock(path: Path) -> list[str]:
         except ValueError:
             continue
         if ev.get("kind") == "queued" and ev.get("line"):
-            out.append(ev["line"])
-    return out
+            out.append((ev.get("id"), ev["line"]))
+    if not out:
+        return []
+    target = battle or out[-1][0]
+    return [ln for bid, ln in out if bid == target]
 
 
 def lines_from_replay(path: Path) -> list[str]:
@@ -95,12 +102,15 @@ def main():
     src.add_argument("--clock", help="presentation_clock.jsonl")
     src.add_argument("--replay", help="Showdown replay log")
     ap.add_argument("--role", default="p1", help="which side is US (p1/p2)")
+    ap.add_argument("--battle", default=None,
+                    help="battle id in a multi-battle clock log "
+                         "(default: the last one seen)")
     ap.add_argument("--turns", help="e.g. 27 or 26-29 (default: all)")
     ap.add_argument("--only-beats", action="store_true",
                     help="skip turns that produced no beat")
     args = ap.parse_args()
 
-    lines = (lines_from_clock(Path(args.clock)) if args.clock
+    lines = (lines_from_clock(Path(args.clock), args.battle) if args.clock
              else lines_from_replay(Path(args.replay)))
     if not lines:
         raise SystemExit("no protocol lines found")
