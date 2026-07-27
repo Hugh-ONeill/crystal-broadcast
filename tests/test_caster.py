@@ -657,3 +657,31 @@ def test_request_body_turns_thinking_off_without_a_proxy():
 
     assert sent["body"]["reasoning_effort"] == "none"
     assert ":11434" in sent["url"] and ":11435" not in sent["url"]
+
+
+def test_species_spelling_is_corrected_against_the_actives():
+    """Measured: PRISM reliably wrote 'Gargancl'/'Garganyl' for Garganacl even
+    with the name in the beat twice and in the on-field grounding block. A
+    misspelled species on a lower-third is what viewers notice, and a 4B-active
+    model will not be prompted out of mangling an unusual name."""
+    from crystal_broadcast.caster import _fix_species_spelling as fix
+    item = {"hud": {"us": "Great Tusk", "them": "Garganacl"}}
+    assert fix("The Tera on Gargancl changes it.", item).count("Garganacl") == 1
+    assert fix("Garganyl is Flying now.", item).startswith("Garganacl")
+    # possessives keep their suffix: the token stops before the apostrophe
+    assert fix("Gargancl's Salt Cure ticks.", item).startswith("Garganacl's")
+
+
+def test_species_speller_leaves_correct_and_unrelated_words_alone():
+    """Narrow by construction: candidates are only the actives and the cutoff
+    is high, so ordinary vocabulary must survive untouched."""
+    from crystal_broadcast.caster import _fix_species_spelling as fix
+    item = {"hud": {"us": "Great Tusk", "them": "Garganacl"}}
+    for line in ("The Flying Tera on Garganacl changes the math.",
+                 "Great Tusk uses Earthquake on the Terastallized wall.",
+                 "Stealth Rock and Spikes are both up now."):
+        assert fix(line, item) == line
+    # no hud, or multi-word actives only: no-op rather than a bad guess
+    assert fix("Gargancl is here.", {"hud": {}}) == "Gargancl is here."
+    assert fix("Tuskk hits hard.", {"hud": {"us": "Great Tusk"}}) == \
+        "Tuskk hits hard."

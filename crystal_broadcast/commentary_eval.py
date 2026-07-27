@@ -228,15 +228,18 @@ def run_replay_fixture(entry: dict):
     for key in ("ours_fainted", "theirs_fainted"):
         if isinstance(ctx_kw.get(key), list):
             ctx_kw[key] = frozenset(ctx_kw[key])
-    return [director.decide(TurnContext(**ctx_kw))]
+    ctx = TurnContext(**ctx_kw)
+    return [director.decide(ctx)], ctx
 
 
-def run_director(entry: dict) -> tuple[list, object, list[str]]:
+def run_director(entry: dict) -> tuple[list, object, list[str], object]:
     """Feed the fixture through fresh scanner+director; return (decisions,
-    final decision, misses)."""
+    final decision, misses, final ctx). The ctx comes back because the
+    caster level needs it to build the SAME hud gen9_player sends in
+    production — see run_caster."""
     fx = entry["fixture"]
     if "replay" in fx:
-        decisions = run_replay_fixture(entry)
+        decisions, final_ctx = run_replay_fixture(entry)
     else:
         scanner = ProtocolScanner()
         # optional inline ability map for status-synergy entries:
@@ -253,18 +256,20 @@ def run_director(entry: dict) -> tuple[list, object, list[str]]:
         # feeds these directly, so the gold fixture does too
         for e in fx.get("events", []):
             director.observe([Event(**e)])
-        decisions = [director.decide(_ctx(c)) for c in fx["ctx"]]
+        ctxs = [_ctx(c) for c in fx["ctx"]]
+        decisions = [director.decide(c) for c in ctxs]
+        final_ctx = ctxs[-1]
     final = decisions[-1]
     misses = []
 
     if entry.get("silence"):
         if not final.silence or final.text is not None:
             misses.append(f"expected silence, got: {final.text!r}")
-        return decisions, final, misses
+        return decisions, final, misses, final_ctx
 
     if final.text is None:
         misses.append("decision was silent, expected a beat")
-        return decisions, final, misses
+        return decisions, final, misses, final_ctx
 
     want_beat = entry.get("beat")
     if want_beat:
@@ -283,11 +288,11 @@ def run_director(entry: dict) -> tuple[list, object, list[str]]:
     for spec in entry.get("must_mention", []):
         if not _mention_ok(final.text, spec):
             misses.append(f"beat text missing {spec!r}")
-    return decisions, final, misses
+    return decisions, final, misses, final_ctx
 
 
 def run_caster(entry: dict, decisions, final, upstream: str,
-               model: str) -> list[str]:
+               model: str, final_ctx=None) -> list[str]:
     """Generate real lines for the final decision and check the spoken
     layer: who spoke, what they said, what they must never say."""
     from crystal_broadcast.caster import Caster
@@ -312,7 +317,17 @@ def run_caster(entry: dict, decisions, final, upstream: str,
     if fx.get("grudges"):
         from crystal_broadcast.grudge_ledger import GrudgeLedger
         caster.grudges = GrudgeLedger(fx["grudges"])
+    # Build the SAME hud gen9_player sends. The eval used to pass only the
+    # turn, so the caster's "ON THE FIELD RIGHT NOW: ours is X, theirs is Y"
+    # grounding block never fired here — PRISM had to echo species names out
+    # of the beat prose and sometimes mangled them ("Garganyl", "Gargancl")
+    # or dropped them. That is an eval artifact, not caster behaviour:
+    # production always states the actives.
     hud = {"turn": turn}
+    if final_ctx is not None:
+        hud.update({"us": final_ctx.me_name, "us_hp": final_ctx.me_hp,
+                    "them": final_ctx.opp_name, "them_hp": final_ctx.opp_hp,
+                    "value": final_ctx.value})
     if fx.get("opp"):
         hud["them"] = fx["opp"]
     item = {"text": final.text, "beats": [asdict(b) for b in final.beats],
@@ -419,7 +434,7 @@ def main():
     failed = []
 
     for entry in entries:
-        decisions, final, misses = run_director(entry)
+        decisions, final, misses, final_ctx = run_director(entry)
         dim = "silence" if entry.get("silence") else "beat/attribution"
         text_misses = [m for m in misses if m.startswith("beat text")]
         attr_misses = [m for m in misses if not m.startswith("beat text")]
@@ -431,7 +446,7 @@ def main():
 
         if args.level == "caster" and not misses and not entry.get("silence"):
             c_misses = run_caster(entry, decisions, final, args.upstream,
-                                  args.model)
+                                  args.model, final_ctx)
             dims["spoken lines"][1] += 1
             dims["spoken lines"][0] += 0 if c_misses else 1
             misses += c_misses

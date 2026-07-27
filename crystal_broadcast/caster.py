@@ -42,6 +42,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import websockets
 
+import difflib
 import re
 
 from crystal_broadcast.caster_bridge import _sanitize, _unwrap
@@ -170,6 +171,41 @@ def _turn_of(beat: str):
     has no turn). Same shape commentary_overlay.py parses."""
     m = re.search(r"\bT(\d+)\b", beat)
     return int(m.group(1)) if m else None
+
+
+# A capitalised word of 5+ letters: the shape of a species name. Apostrophes
+# are excluded so a possessive keeps its "'s" while the stem is corrected.
+_SPECIES_TOKEN = re.compile(r"\b[A-Z][A-Za-z\-]{4,}\b")
+
+
+def _fix_species_spelling(line: str, item: dict) -> str:
+    """Correct near-miss species spellings against the mons actually on the
+    field.
+
+    Measured 2026-07-27: PRISM reliably wrote "Gargancl" / "Garganyl" for
+    Garganacl even with the name in the beat twice AND in the on-field
+    grounding block — an unusual name a 4B-active model mangles. A misspelled
+    species on a broadcast lower-third is exactly the sort of thing viewers
+    notice, and deterministic correction beats asking the model to try harder.
+
+    Deliberately narrow: candidates are only the two actives, the cutoff is
+    high, and multi-word species (Great Tusk, Iron Valiant) are out of scope
+    because a single token can't be matched against them safely.
+    """
+    hud = item.get("hud") or {}
+    known = [n for n in (hud.get("us"), hud.get("them"))
+             if n and " " not in n]
+    if not known or not line:
+        return line
+
+    def repl(m):
+        tok = m.group(0)
+        if tok in known:
+            return tok
+        near = difflib.get_close_matches(tok, known, n=1, cutoff=0.8)
+        return near[0] if near else tok
+
+    return _SPECIES_TOKEN.sub(repl, line)
 
 
 def _content_bigrams(line: str) -> set:
@@ -805,6 +841,7 @@ class Caster:
                       flush=True)
                 continue
             line = _sanitize(_SELF_LABEL.sub("", raw.strip()))
+            line = _fix_species_spelling(line, item)
             # facts-of-record guard: a fabricated crit is the common one
             # (a super-effective/heavy hit narrated as a "crit" that never
             # happened). If the line claims a crit the beat never stated,
