@@ -286,7 +286,8 @@ def run_director(entry: dict) -> tuple[list, object, list[str]]:
     return decisions, final, misses
 
 
-def run_caster(entry: dict, final, upstream: str, model: str) -> list[str]:
+def run_caster(entry: dict, decisions, final, upstream: str,
+               model: str) -> list[str]:
     """Generate real lines for the final decision and check the spoken
     layer: who spoke, what they said, what they must never say."""
     from crystal_broadcast.caster import Caster
@@ -343,7 +344,15 @@ def run_caster(entry: dict, final, upstream: str, model: str) -> list[str]:
             elif not _mention_ok(by[who], spec):
                 misses.append(f"{who} line missing {spec!r}: {by[who]!r}")
 
-    allowed_text = (final.text or "") + " " + " ".join(
+    # Ground against EVERY beat this fixture produced, not just the last one.
+    # In production the caster carries a duo transcript, so a beat that refers
+    # back ("our Gliscor is STILL asleep (turn 2 of it)") arrives with the
+    # earlier beat that named the cause. The eval generates one decision in
+    # isolation, so grounding on final.text alone flagged the caster for
+    # recalling something it legitimately saw — gc-0014 failed on 'Spore'
+    # while the fixture's own first batch is the Spore that caused the sleep.
+    allowed_text = " ".join(d.text for d in decisions if getattr(d, "text", None))
+    allowed_text += " " + (final.text or "") + " " + " ".join(
         entry.get("allowed_entities", []))
     # ground the moves behind a status ON THE BOARD: naming the move that
     # inflicted a status the caster is reacting to isn't a hallucination.
@@ -410,7 +419,7 @@ def main():
     failed = []
 
     for entry in entries:
-        _, final, misses = run_director(entry)
+        decisions, final, misses = run_director(entry)
         dim = "silence" if entry.get("silence") else "beat/attribution"
         text_misses = [m for m in misses if m.startswith("beat text")]
         attr_misses = [m for m in misses if not m.startswith("beat text")]
@@ -421,7 +430,8 @@ def main():
             dims["faithfulness(text)"][0] += 0 if text_misses else 1
 
         if args.level == "caster" and not misses and not entry.get("silence"):
-            c_misses = run_caster(entry, final, args.upstream, args.model)
+            c_misses = run_caster(entry, decisions, final, args.upstream,
+                                  args.model)
             dims["spoken lines"][1] += 1
             dims["spoken lines"][0] += 0 if c_misses else 1
             misses += c_misses
