@@ -803,3 +803,42 @@ def test_untagged_drop_with_no_known_move_stays_neutral():
     ub = [e for e in evs if e.type == "unboost"][0]
     assert ub.prose == "Gliscor's Speed was cut"
     assert ub.data["cause"] is None
+
+
+def test_field_effects_name_who_set_them():
+    """'Rain set in' / 'Spikes went up on their side' read as weather, in the
+    idiomatic sense: things that merely happen. Which side owns a screen, a
+    hazard layer or the weather is usually the whole tactical point."""
+    sc = ProtocolScanner()
+    haz = sc.scan([
+        ["", "move", "p1a: Gliscor", "Spikes", "p2a: Great Tusk"],
+        ["", "-sidestart", "p2: FPAiri", "Spikes"],
+    ], role="p1")
+    h = [e for e in haz if e.type == "hazard_set"][0]
+    assert "Gliscor set Spikes" in h.prose and "their side" in h.prose
+
+    sc = ProtocolScanner()
+    rain = sc.scan([
+        ["", "switch", "p2a: Pelipper", "Pelipper", "100/100"],
+        ["", "-weather", "RainDance", "[from] ability: Drizzle",
+         "[of] p2a: Pelipper"],
+    ], role="p1")
+    w = [e for e in rain if e.type == "weather_set"][0]
+    assert "Pelipper's Drizzle" in w.prose
+
+    sc = ProtocolScanner()
+    tr = sc.scan([
+        ["", "move", "p2a: Iron Valiant", "Trick Room", "p2a: Iron Valiant"],
+        ["", "-fieldstart", "move: Trick Room"],
+    ], role="p1")
+    f = [e for e in tr if e.type == "field_start"][0]
+    assert "Iron Valiant brought up Trick Room" in f.prose
+
+
+def test_field_effect_with_no_known_cause_keeps_the_old_wording():
+    """Never guess a setter: with nothing to attribute to, stay impersonal."""
+    sc = ProtocolScanner()
+    evs = sc.scan([["", "-weather", "Sandstorm"]], role="p1")
+    w = [e for e in evs if e.type == "weather_set"][0]
+    assert w.prose == "sand set in" or w.prose.endswith("set in")
+    assert w.data["user"] is None

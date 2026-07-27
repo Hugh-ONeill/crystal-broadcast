@@ -440,6 +440,23 @@ class ProtocolScanner:
         # call our fainted Clefable "their Cleric" while they had a Toxapex in.
         self._team_species: dict[str, set] = {}
 
+
+    def _causer(self, trailing, qual, side_of, name_of):
+        """Who caused a field-wide effect: an '[of]' ability holder, else the
+        move that just resolved. Returns (prose_fragment, cause) or (None,
+        None). Weather/hazards/terrain read as things that merely HAPPEN
+        otherwise ('Rain set in'), and which side set them is usually the
+        whole tactical point."""
+        abil = _from_ability(trailing)
+        holder = next((e.split("]", 1)[1].strip() for e in trailing
+                       if e.startswith("[of]") and "]" in e), None)
+        if abil:
+            return (f"{qual(holder)}'s {abil}" if holder else abil), abil
+        lm = self._last_move
+        if lm:
+            return lm[0], lm[1]
+        return None, None
+
     def scan(self, messages, role=None) -> list[Event]:
         out: list[Event] = []
         cur = None
@@ -908,16 +925,21 @@ class ProtocolScanner:
                 low = cond.lower()
                 # setting hazards/screens is routine tempo — record it, but
                 # don't force a beat (removing them below IS a swing)
+                who, cause = self._causer(sm[4:], qual, side_of, name_of)
                 if low in _HAZARDS:
+                    prose = (f"{who} set {cond} on {poss} side" if who
+                             else f"{cond} went up on {poss} side")
                     out.append(Event(
-                        "hazard_set", f"{cond} went up on {poss} side",
+                        "hazard_set", prose,
                         side=side_of(sm[2]),
-                        data={"condition": cond}))
+                        data={"condition": cond, "user": who}))
                 elif low in _SCREENS:
+                    prose = (f"{who} put {cond} up on {poss} side" if who
+                             else f"{cond} went up on {poss} side")
                     out.append(Event(
-                        "screens_set", f"{cond} went up on {poss} side",
+                        "screens_set", prose,
                         side=side_of(sm[2]),
-                        data={"condition": cond}))
+                        data={"condition": cond, "user": who}))
                 elif low == "tailwind":
                     out.append(Event(
                         "tailwind_up", f"Tailwind kicked in for {poss} side",
@@ -973,15 +995,24 @@ class ProtocolScanner:
                     else:
                         label = _WEATHER.get(w.lower().replace(" ", ""), w)
                         if label != self._weather:
+                            who, cause = self._causer(sm[3:], qual, side_of,
+                                                      name_of)
+                            prose = (f"{who} set {label} up" if who
+                                     else f"{label} set in")
                             out.append(Event(
-                                "weather_set", f"{label} set in",
-                                notable=True, data={"weather": label}))
+                                "weather_set", prose,
+                                notable=True,
+                                data={"weather": label, "user": who}))
                             self._weather = label
             elif t == "-fieldstart" and len(sm) > 2:
                 cond = _cond_name(sm[2])
                 flush()
-                out.append(Event("field_start", f"{cond} took over the field",
-                                 notable=True, data={"condition": cond}))
+                who, cause = self._causer(sm[3:], qual, side_of, name_of)
+                prose = (f"{who} brought up {cond}" if who
+                         else f"{cond} took over the field")
+                out.append(Event("field_start", prose,
+                                 notable=True,
+                                 data={"condition": cond, "user": who}))
             elif t == "-fieldend" and len(sm) > 2:
                 cond = _cond_name(sm[2])
                 if cond.lower() == "trick room":
