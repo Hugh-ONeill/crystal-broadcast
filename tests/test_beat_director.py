@@ -609,3 +609,37 @@ def test_trick_with_one_sided_item_still_names_its_user():
     assert len(tricks) == 1
     assert "Gholdengo" in tricks[0].prose
     assert "Choice Scarf" in tricks[0].prose
+
+
+def test_ability_triggered_status_is_passive_and_credits_the_holder():
+    """Regression (live 2026-07-27): the active template put the ability in
+    the subject slot ('Flame Body burned our Zamazenta'), and FRACTURE read
+    that as the opponent acting: 'Moltres just used Flame Body to torch my
+    Zamazenta'. Flame Body is a passive that fired off OUR OWN contact move."""
+    sc = ProtocolScanner()
+    evs = sc.scan([
+        ["", "move", "p1a: Zamazenta", "Close Combat", "p2a: Moltres"],
+        ["", "-damage", "p2a: Moltres", "55/100"],
+        ["", "-status", "p1a: Zamazenta", "brn", "[from] ability: Flame Body",
+         "[of] p2a: Moltres"],
+    ], role="p1")
+    st = [e for e in evs if e.type == "status_applied"]
+    assert len(st) == 1
+    prose = st[0].prose
+    assert "was burned by" in prose            # passive, not "Flame Body burned"
+    assert not prose.startswith("Flame Body")
+    assert "Moltres's Flame Body" in prose     # credited to its holder
+    assert st[0].data["cause"] == "Flame Body"  # data unchanged for the caster
+
+
+def test_move_and_item_status_causes_keep_the_active_voice():
+    """Only ABILITIES change voice. A move's user really did act, and an orb
+    is self-inflicted, so neither can be mistaken for the opponent acting."""
+    sc = ProtocolScanner()
+    evs = sc.scan([
+        ["", "-status", "p2a: Moltres", "tox", "[from] move: Toxic"],
+        ["", "-status", "p1a: Gliscor", "tox", "[from] item: Toxic Orb"],
+    ], role="p1")
+    prose = [e.prose for e in evs if e.type == "status_applied"]
+    assert any(p.startswith("Toxic ") for p in prose)
+    assert any(p.startswith("Toxic Orb ") for p in prose)

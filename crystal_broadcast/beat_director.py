@@ -295,6 +295,18 @@ _STATUS_INFLICT = {
     "slp": "put {n} to sleep", "psn": "poisoned {n}",
     "tox": "badly poisoned {n}",
 }
+# Passive voice, used ONLY when the cause is an ABILITY. The active templates
+# above put the cause in the subject slot ("Flame Body burned our Zamazenta"),
+# which reads as something the opponent DID. Measured live 2026-07-27:
+# FRACTURE turned that beat into "Moltres just used Flame Body to torch my
+# Zamazenta", when Flame Body is a passive that fired off OUR OWN contact
+# move. Moves and items keep the active form: a move's user really did act,
+# and a Toxic/Flame Orb is self-inflicted so there is no side to confuse.
+_STATUS_INFLICT_PASSIVE = {
+    "frz": "{n} was frozen solid", "brn": "{n} was burned",
+    "par": "{n} was paralyzed", "slp": "{n} was put to sleep",
+    "psn": "{n} was poisoned", "tox": "{n} was badly poisoned",
+}
 _STATUS_CURE = {
     "frz": "{n} thawed out", "slp": "{n} woke up",
     "par": "{n} shook off the paralysis", "brn": "{n}'s burn healed",
@@ -635,13 +647,27 @@ class ProtocolScanner:
                 if tmpl:
                     flush()  # emit the causing move first, then its effect
                     cause = _status_cause(sm[4:])
-                    prose = tmpl.format(n=qual(sm[2]))
-                    if cause:
-                        # name the cause (move OR item like Toxic Orb) or
-                        # downstream commentary invents one (a caster said
-                        # "Spore" on a beat that only read "put to sleep",
-                        # and "the poison from Psychic Noise" for a Toxic Orb)
-                        prose = f"{cause} {prose}"
+                    abil = _from_ability(sm[4:])
+                    if abil and sm[3] in _STATUS_INFLICT_PASSIVE:
+                        # an ability is a PASSIVE trigger, usually off our own
+                        # move making contact. Active voice ("Flame Body
+                        # burned X") reads as the opponent acting, so go
+                        # passive and attribute the ability to its holder.
+                        holder = next(
+                            (e.split("]", 1)[1].strip() for e in sm[4:]
+                             if e.startswith("[of]") and "]" in e), None)
+                        src = f"{qual(holder)}'s {abil}" if holder else abil
+                        prose = (_STATUS_INFLICT_PASSIVE[sm[3]]
+                                 .format(n=qual(sm[2])) + f" by {src}")
+                    else:
+                        prose = tmpl.format(n=qual(sm[2]))
+                        if cause:
+                            # name the cause (move OR item like Toxic Orb) or
+                            # downstream commentary invents one (a caster said
+                            # "Spore" on a beat that only read "put to sleep",
+                            # and "the poison from Psychic Noise" for a Toxic
+                            # Orb)
+                            prose = f"{cause} {prose}"
                     out.append(Event(
                         "status_applied", prose,
                         side=side_of(sm[2]), notable=True,
