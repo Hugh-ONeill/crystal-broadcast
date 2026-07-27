@@ -197,8 +197,16 @@
   # run produced correct facts in wording outside narrower lists
   # ("everything we built just got teleported", "identical, just mirrored")
   must_mention: ["court change|swap|mirror|teleport|stole|heist|flip"]
-  must_mention_gremlin: ["hazard|spikes|rocks|built|stole|heist|teleport"]
-  must_mention_analyst: ["swap|flip|reversed|mirror|side|reset"]
+  # Per-persona specs verify EACH voice engaged (the handoff), which the
+  # shared any-of cannot: it joins both lines, so one voice carrying the
+  # event would hide the other saying nothing. But they must list the
+  # EVENT'S nouns, not a guess at each persona's idiom — as register lists
+  # they were unwinnable. Rejected lines, all correct: "I am literally being
+  # robbed by a rabbit!", "EVERYTHING IS UPSIDE DOWN!", "I CALLED THE SWAP!"
+  # (swap was in the analyst list), and PRISM's "an exchange of hazards and
+  # screens" (exchange in neither).
+  must_mention_gremlin: ["court change|cinderace|hazard|screen|swap|side|flip|upside down"]
+  must_mention_analyst: ["court change|cinderace|hazard|screen|swap|side|flip|exchange|reset"]
   fixture:
     role: p1
     batches:
