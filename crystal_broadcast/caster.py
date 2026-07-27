@@ -273,6 +273,17 @@ class Caster:
         # (MATCH START / RESULT) queue separately and always speak
         self._pending_turn: dict | None = None
         self._pending_framing: deque = deque()
+        # Under PTS the policy INVERTS to queue-don't-skip. Skip-don't-queue
+        # exists because a stale beat is worse than no beat — but once the
+        # caster is deliberately holding lines for the viewer, "behind" is
+        # correct, and the single pending slot then discards exactly the turns
+        # the viewer is about to watch. Measured 2026-07-27: while speak() sat
+        # in an 83s hold, every arriving beat replaced the last, so a 33-turn
+        # game produced 5 spoken beats (T1, T6, T12, T23). The queue drains
+        # faster than the viewer advances (generation ~8s vs ~13s per
+        # presented turn), so it self-corrects rather than growing.
+        self._pending_queue: deque = deque()
+        self.PENDING_QUEUE_MAX = 120
         self._wake = asyncio.Event()
 
     # --- grounded facts (PRISM only) -----------------------------------
@@ -515,10 +526,18 @@ class Caster:
                             or text.startswith("[RESULT]")):
                         self._pending_framing.append(item)
                     else:
-                        if self._pending_turn is not None:
-                            # the cost side of skip-don't-queue, now counted
-                            self._pace_stats["dropped"] += 1
-                        self._pending_turn = item  # replace unspoken older
+                        if self.pts is not None:
+                            # queue-don't-skip: every turn the viewer will
+                            # watch gets its line
+                            if len(self._pending_queue) >= self.PENDING_QUEUE_MAX:
+                                self._pending_queue.popleft()
+                                self._pace_stats["dropped"] += 1
+                            self._pending_queue.append(item)
+                        else:
+                            if self._pending_turn is not None:
+                                # the cost side of skip-don't-queue, counted
+                                self._pace_stats["dropped"] += 1
+                            self._pending_turn = item  # replace unspoken older
                     self._wake.set()
         finally:
             self.clients.discard(ws)
@@ -930,9 +949,12 @@ class Caster:
         while True:
             await self._wake.wait()
             self._wake.clear()
-            while self._pending_framing or self._pending_turn:
+            while (self._pending_framing or self._pending_turn
+                   or self._pending_queue):
                 if self._pending_framing:
                     item = self._pending_framing.popleft()
+                elif self._pending_queue:
+                    item = self._pending_queue.popleft()
                 else:
                     item, self._pending_turn = self._pending_turn, None
                 await self.speak(item)

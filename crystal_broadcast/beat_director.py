@@ -1109,7 +1109,18 @@ class Director:
     fabricate ctx from replays."""
 
     def __init__(self, min_interval: float = 20.0, min_swing: float = 0.10,
-                 floor: float = 5.0, stats_fn=None, ability_fn=None):
+                 floor: float = 5.0, stats_fn=None, ability_fn=None,
+                 min_turn_gap: int = 0, quiet_turn_gap: int = 3):
+        # Turn gating (min_turn_gap > 0) replaces the wall-clock floor and
+        # interval. Under PTS scheduling the audience watches on the CLIENT's
+        # timeline, so "am I talking too much" is a question about viewer
+        # time, and viewer time is proportional to TURNS — not to how fast the
+        # engine resolved them. Measured 2026-07-27: with pacing off a 40-turn
+        # game resolved in ~3 minutes, so the 5s floor silenced nearly every
+        # turn and the whole broadcast got FIVE beats for a 10+ minute watch.
+        # 0 keeps the old time gating, so nothing changes unless asked.
+        self.min_turn_gap = min_turn_gap
+        self.quiet_turn_gap = quiet_turn_gap
         self.min_interval = min_interval
         self.min_swing = min_swing
         self.floor = floor
@@ -1123,6 +1134,7 @@ class Director:
         self._prev_value: float | None = None
         self._prev_read: str | None = None
         self._prev_disagree: str | None = None
+        self._last_beat_turn: int | None = None
         self._prev_fainted: tuple[frozenset, frozenset] = (frozenset(),
                                                            frozenset())
         # (side, mon) -> consecutive decision points spent asleep/frozen
@@ -1209,11 +1221,19 @@ class Director:
         # advances even on silent decisions)
         esc_prose = self._tick_afflictions(ctx)
 
-        if ctx.elapsed < self.floor:
-            return Decision(None, [], True)
+        if self.min_turn_gap:
+            # viewer-time gating: turns since the last beat we SENT
+            gap = (None if self._last_beat_turn is None
+                   else ctx.turn - self._last_beat_turn)
+            if gap is not None and gap < self.min_turn_gap:
+                return Decision(None, [], True)
+            quiet_due = gap is None or gap >= self.quiet_turn_gap
+        else:
+            if ctx.elapsed < self.floor:
+                return Decision(None, [], True)
+            quiet_due = ctx.elapsed >= self.min_interval
         if not (self._notable or faints or swing is None
-                or abs(swing) >= self.min_swing
-                or ctx.elapsed >= self.min_interval):
+                or abs(swing) >= self.min_swing or quiet_due):
             return Decision(None, [], True)
 
         pairs = [(ev, classify(ev, self.stats_fn, self.ability_fn))
@@ -1328,6 +1348,7 @@ class Director:
         self._prev_read = read
         self._prev_disagree = disagree
         self._prev_fainted = (ctx.ours_fainted, ctx.theirs_fainted)
+        self._last_beat_turn = ctx.turn
         self._pending = []
         self._notable = False
 

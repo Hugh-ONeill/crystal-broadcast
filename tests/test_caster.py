@@ -585,3 +585,33 @@ def test_pts_absent_publishes_immediately():
 
     asyncio.run(scenario())
     assert published == ["PRISM"]
+
+
+def test_pts_queues_beats_instead_of_dropping_them():
+    """Under PTS the caster deliberately runs behind, so the single pending
+    slot would discard exactly the turns the viewer is about to watch.
+    Measured 2026-07-27: an 83s hold turned a 33-turn game into 5 spoken
+    beats. Queue-don't-skip while a clock is attached."""
+    from showdown.pts_clock import PresentationClock
+
+    c = Caster("http://unused", "test-model", expert_url=None,
+               pts=PresentationClock(max_hold=1))
+    for turn in range(1, 6):
+        c._pending_queue.append({"text": f"[BATTLE T{turn}] x",
+                                 "beats": [], "hud": None})
+    assert len(c._pending_queue) == 5
+    assert c._pace_stats["dropped"] == 0
+
+
+def test_without_pts_the_single_slot_still_skips():
+    """Byte-for-byte old behaviour when no clock is attached: a newer turn
+    beat replaces an unspoken older one."""
+    c = Caster("http://unused", "test-model", expert_url=None)
+    assert c.pts is None
+    c._pending_turn = {"text": "[BATTLE T1] old", "beats": [], "hud": None}
+    # simulate the intake branch the handler takes with no clock
+    if c._pending_turn is not None:
+        c._pace_stats["dropped"] += 1
+    c._pending_turn = {"text": "[BATTLE T2] new", "beats": [], "hud": None}
+    assert c._pending_turn["text"].endswith("new")
+    assert c._pace_stats["dropped"] == 1

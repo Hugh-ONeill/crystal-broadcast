@@ -672,3 +672,46 @@ def test_self_targeted_move_does_not_say_on_itself():
     ], role="p1")
     for e in evs:
         assert " on Gliscor" not in e.prose
+
+
+def _quiet_ctx(turn, elapsed):
+    """A turn with nothing notable: no faints, no swing, no events."""
+    return _ctx(turn=turn, value=0.5, elapsed=elapsed)
+
+
+def test_turn_gate_survives_a_fast_engine_where_the_time_floor_does_not():
+    """Regression (measured 2026-07-27): unpaced, a 40-turn game resolves in
+    ~3 minutes, so ctx.elapsed sits under the 5s floor almost every turn and
+    the whole broadcast got FIVE beats. Under PTS the viewer watches on the
+    CLIENT's clock, so density must track turns."""
+    fast = 2.0   # seconds per turn with the pace hold off
+
+    timed = Director()                       # wall-clock gating (default)
+    timed._prev_value = 0.5
+    spoke_timed = sum(1 for t in range(2, 22)
+                      if not timed.decide(_quiet_ctx(t, fast)).silence)
+
+    turned = Director(min_turn_gap=1, quiet_turn_gap=3)
+    turned._prev_value = 0.5
+    spoke_turned = sum(1 for t in range(2, 22)
+                       if not turned.decide(_quiet_ctx(t, fast)).silence)
+
+    assert spoke_timed == 0, "the 5s floor silences a fast engine entirely"
+    assert spoke_turned >= 5, "turn gating keeps talking to the viewer"
+
+
+def test_turn_gate_still_refuses_to_talk_twice_in_one_turn():
+    d = Director(min_turn_gap=2, quiet_turn_gap=2)
+    d._prev_value = 0.5
+    assert not d.decide(_quiet_ctx(5, 1.0)).silence      # first beat
+    assert d.decide(_quiet_ctx(6, 1.0)).silence          # gap 1 < 2
+    assert not d.decide(_quiet_ctx(7, 1.0)).silence      # gap 2 == 2
+
+
+def test_turn_gating_is_off_by_default():
+    """min_turn_gap=0 keeps the wall-clock behaviour byte-for-byte."""
+    d = Director()
+    assert d.min_turn_gap == 0
+    d._prev_value = 0.5
+    assert d.decide(_quiet_ctx(5, 1.0)).silence          # under the 5s floor
+    assert not d.decide(_quiet_ctx(6, 25.0)).silence     # past min_interval
