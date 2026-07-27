@@ -425,7 +425,9 @@ class ProtocolScanner:
     def reset(self):
         self._hp: dict = {}
         self._weather: str | None = None
-        self._last_move: tuple[str, str] | None = None
+        # (mover species, move, mover side) — side is what lets an effect
+        # tell a SELF-inflicted drop from one the opponent caused
+        self._last_move: tuple | None = None
         # position -> species, from switch/drag/replace details: protocol
         # position tokens carry NICKNAMES ("p1a: Speak Softly"), and prose
         # built from them leaks the nickname ("knocked off Speak Softly" —
@@ -499,7 +501,8 @@ class ProtocolScanner:
                 # survives the flush so effects whose protocol line follows
                 # the move (Court Change's -swapsideconditions) can name
                 # their user
-                self._last_move = (cur["mover"], cur["move"])
+                self._last_move = (cur["mover"], cur["move"],
+                                   cur.get("mover_side"))
             if not cur or not cur.get("move"):
                 cur = None
                 return
@@ -522,7 +525,12 @@ class ProtocolScanner:
             target_side = ({"us": "them", "them": "us"}.get(mover_side)
                            if mover_side else None)
             if cur.get("missed"):
-                out.append(Event("move_missed", f"{head} missed",
+                # name the target, same rule as the hit and ko branches: a
+                # miss with no victim leaves the caster to guess who dodged
+                miss = f"{head} missed"
+                if target_disp and target_disp != mover_disp:
+                    miss += f" {target_disp}"
+                out.append(Event("move_missed", miss,
                                  side=mover_side,
                                  data={"mover": cur["mover"],
                                        "move": cur["move"]}))
@@ -710,15 +718,27 @@ class ProtocolScanner:
                 ate = any("[eat]" in a for a in sm[4:])
                 mside = side_of(sm[2])
                 if by == "Knock Off":
+                    # name the user: Knock Off is something somebody DID
+                    lm = self._last_move
+                    who = lm[0] if lm and lm[1] == "Knock Off" else None
+                    prose = (f"{who} knocked the {item} off {mon_q}" if who
+                             else f"{item} was knocked off {mon_q}")
                     out.append(Event(
-                        "item_knocked_off", f"{item} was knocked off {mon_q}",
+                        "item_knocked_off", prose,
                         side=mside, notable=True,
-                        data={"mon": mon, "item": item}))
+                        data={"mon": mon, "item": item, "user": who}))
                 elif by in ("Thief", "Covet", "Magician", "Pickpocket"):
+                    # the -item half of a theft already names the thief
+                    # actively; this half was passive, so the same steal read
+                    # as an event with no perpetrator
+                    lm = self._last_move
+                    who = lm[0] if lm and lm[1] == by else None
+                    prose = (f"{who} swiped {mon_q}'s {item} with {by}"
+                             if who else f"{mon_q}'s {item} was swiped away")
                     out.append(Event(
-                        "item_stolen", f"{mon_q}'s {item} was swiped away",
+                        "item_stolen", prose,
                         side=mside, notable=True,
-                        data={"mon": mon, "item": item}))
+                        data={"mon": mon, "item": item, "user": who}))
                 elif item == "Focus Sash":
                     out.append(Event(
                         "sash_saved", f"{mon_q}'s Focus Sash let it cling on",
@@ -787,11 +807,35 @@ class ProtocolScanner:
                 stat = _STAT.get(sm[3], sm[3])
                 amt = int(sm[4]) if sm[4].lstrip("-").isdigit() else 1
                 adv = "sharply " if amt >= 2 else ""
+                # WHO cut it. "X's Defense was cut" is the same sentence
+                # whether X dropped it with its own Close Combat or the
+                # opponent's Intimidate did — opposite readings, and the
+                # caster picks one. Ability causes name their holder; an
+                # untagged drop right after X's own move is self-inflicted.
+                mon_q, mon = qual(sm[2]), name_of(sm[2])
+                abil = _from_ability(sm[4:])
+                holder = next((e.split("]", 1)[1].strip() for e in sm[4:]
+                               if e.startswith("[of]") and "]" in e), None)
+                lm = self._last_move
+                if abil:
+                    src = f"{qual(holder)}'s {abil}" if holder else abil
+                    prose = f"{mon_q}'s {stat} was {adv}cut by {src}"
+                    cause = abil
+                elif lm and lm[0] == mon:
+                    prose = (f"{mon_q} {adv}dropped its own {stat} "
+                             f"using {lm[1]}")
+                    cause = lm[1]
+                elif lm:
+                    prose = f"{lm[0]}'s {lm[1]} {adv}cut {mon_q}'s {stat}"
+                    cause = lm[1]
+                else:
+                    prose = f"{mon_q}'s {stat} was {adv}cut"
+                    cause = None
                 out.append(Event(
-                    "unboost", f"{qual(sm[2])}'s {stat} was {adv}cut",
+                    "unboost", prose,
                     side=side_of(sm[2]),
-                    data={"mon": name_of(sm[2]), "stat": sm[3],
-                          "amount": amt}))
+                    data={"mon": mon, "stat": sm[3],
+                          "amount": amt, "cause": cause}))
             elif t == "-setboost" and len(sm) > 4:
                 flush()
                 out.append(Event(

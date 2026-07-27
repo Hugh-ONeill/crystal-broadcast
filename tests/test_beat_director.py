@@ -715,3 +715,91 @@ def test_turn_gating_is_off_by_default():
     d._prev_value = 0.5
     assert d.decide(_quiet_ctx(5, 1.0)).silence          # under the 5s floor
     assert not d.decide(_quiet_ctx(6, 25.0)).silence     # past min_interval
+
+
+# --- agency sweep (2026-07-27): every remaining beat whose subject was a
+# mechanic, or whose actor was missing, found by auditing the prose templates
+# after the KO / Trick / ability-status fixes. Same class: the beat was true,
+# the attribution was not.
+
+def test_self_inflicted_stat_drop_is_not_read_as_the_opponent_doing_it():
+    """'X's Defense was cut' is the SAME sentence whether X dropped it with
+    its own Close Combat or the opponent's Intimidate did. Opposite readings,
+    and the caster picks one."""
+    sc = ProtocolScanner()
+    evs = sc.scan([
+        ["", "move", "p2a: Great Tusk", "Headlong Rush", "p1a: Ting-Lu"],
+        ["", "-damage", "p1a: Ting-Lu", "0 fnt"],
+        ["", "-unboost", "p2a: Great Tusk", "def", "1"],
+    ], role="p1")
+    ub = [e for e in evs if e.type == "unboost"][0]
+    assert "its own Defense" in ub.prose and "Headlong Rush" in ub.prose
+    assert ub.data["cause"] == "Headlong Rush"
+
+
+def test_ability_stat_drop_credits_the_holder():
+    sc = ProtocolScanner()
+    evs = sc.scan([
+        ["", "switch", "p2a: Landorus-Therian", "Landorus-Therian", "100/100"],
+        ["", "-unboost", "p1a: Gliscor", "atk", "1",
+         "[from] ability: Intimidate", "[of] p2a: Landorus-Therian"],
+    ], role="p1")
+    ub = [e for e in evs if e.type == "unboost"][0]
+    assert "Landorus-Therian's Intimidate" in ub.prose
+    assert ub.side == "us"                     # OUR mon took it
+
+
+def test_opponent_move_stat_drop_names_the_move_and_the_mover():
+    sc = ProtocolScanner()
+    evs = sc.scan([
+        ["", "move", "p2a: Ogerpon", "Icy Wind", "p1a: Dragonite"],
+        ["", "-damage", "p1a: Dragonite", "70/100"],
+        ["", "-unboost", "p1a: Dragonite", "spe", "1"],
+    ], role="p1")
+    ub = [e for e in evs if e.type == "unboost"][0]
+    assert "Ogerpon's Icy Wind" in ub.prose and "Dragonite" in ub.prose
+
+
+def test_knock_off_names_who_did_it():
+    sc = ProtocolScanner()
+    evs = sc.scan([
+        ["", "move", "p1a: Ting-Lu", "Knock Off", "p2a: Blissey"],
+        ["", "-enditem", "p2a: Blissey", "Leftovers", "[from] move: Knock Off"],
+    ], role="p1")
+    ko = [e for e in evs if e.type == "item_knocked_off"][0]
+    assert "Ting-Lu knocked" in ko.prose and "Blissey" in ko.prose
+    assert ko.data["user"] == "Ting-Lu"
+
+
+def test_theft_names_the_thief_on_both_protocol_halves():
+    """The -item half already named the thief actively; the -enditem half was
+    passive, so the same steal read as an event with no perpetrator."""
+    sc = ProtocolScanner()
+    evs = sc.scan([
+        ["", "move", "p2a: Weavile", "Thief", "p1a: Gliscor"],
+        ["", "-enditem", "p1a: Gliscor", "Toxic Orb", "[from] move: Thief"],
+    ], role="p1")
+    st = [e for e in evs if e.type == "item_stolen"][0]
+    assert "Weavile swiped" in st.prose
+    assert st.data["user"] == "Weavile"
+
+
+def test_a_miss_names_who_dodged():
+    sc = ProtocolScanner()
+    evs = sc.scan([
+        ["", "move", "p2a: Kingambit", "Sucker Punch", "p1a: Darkrai"],
+        ["", "-miss", "p2a: Kingambit", "p1a: Darkrai"],
+        ["", "move", "p1a: Darkrai", "Dark Pulse", "p2a: Kingambit"],
+    ], role="p1")
+    mm = [e for e in evs if e.type == "move_missed"][0]
+    assert "missed Darkrai" in mm.prose
+
+
+def test_untagged_drop_with_no_known_move_stays_neutral():
+    """No cause available: keep the old passive wording rather than invent an
+    actor. Never guess agency."""
+    sc = ProtocolScanner()
+    evs = sc.scan([["", "-unboost", "p1a: Gliscor", "spe", "1"]], role="p1")
+    ub = [e for e in evs if e.type == "unboost"][0]
+    assert ub.prose == "Gliscor's Speed was cut"
+    assert ub.data["cause"] is None
