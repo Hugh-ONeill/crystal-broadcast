@@ -357,6 +357,50 @@ _VOL_END = {
 }
 
 
+def _trick_event(by: str, first, second, last_move) -> Event:
+    """ONE event for a Trick/Switcheroo swap, naming who used it.
+
+    A swap emits two `-item` lines, one per side. Emitting a beat for each
+    spawned two responses from the duo for a single play, and neither beat
+    said WHO used the move — both read as passive ("X was handed a Choice
+    Scarf by Trick"). Live 2026-07-27: our Gholdengo tricked its Choice Scarf
+    onto their Garganacl, and FRACTURE narrated it as the opponent setting her
+    up, because nothing in the beat said the play was ours.
+
+    `first`/`second` are (species, item, side, display); `second` is None when
+    only one side's item moved. `last_move` is the scanner's (mover, move),
+    which identifies the user because flush() runs before the first -item.
+    """
+    user = (last_move[0] if last_move and last_move[1] == by else None)
+    halves = [h for h in (first, second) if h]
+
+    mine = next((h for h in halves if h[0] == user), None)
+    theirs = next((h for h in halves if h is not mine), None)
+
+    if mine and theirs:
+        # `mine[1]` is what the USER now holds, i.e. what it took
+        prose = (f"{mine[3]} used {by} on {theirs[3]}, giving away its "
+                 f"{theirs[1]} and taking the {mine[1]}")
+        side = mine[2]
+    elif mine:
+        prose = f"{mine[3]} used {by} and came away with the {mine[1]}"
+        side = mine[2]
+    elif user and halves:
+        h = halves[0]
+        prose = f"{user} used {by}, handing {h[3]} a {h[1]}"
+        side = h[2]
+    else:
+        # user unknown: keep the original passive wording rather than invent
+        h = halves[0]
+        prose = f"{h[3]} was handed a {h[1]} by {by}"
+        side = h[2]
+
+    data = {"mon": halves[0][0], "item": halves[0][1]}
+    if user:
+        data["user"] = user
+    return Event("item_tricked", prose, side=side, notable=True, data=data)
+
+
 class ProtocolScanner:
     """Walk battle message batches and emit typed Events. Prose lines are
     byte-identical to the pre-director scanner so transcripts, the overlay
@@ -385,6 +429,7 @@ class ProtocolScanner:
     def scan(self, messages, role=None) -> list[Event]:
         out: list[Event] = []
         cur = None
+        pending_trick = None   # first half of a Trick/Switcheroo swap
 
         def name_of(token) -> str:
             """Position token -> species display name (nickname-proof)."""
@@ -403,6 +448,24 @@ class ProtocolScanner:
             s = side_of(side_token)
             return {"us": "our", "them": "their"}.get(s, "one")
 
+        def qual_species(species, s) -> str:
+            """Mirror-match qualifier for an ALREADY-RESOLVED species.
+
+            Use this whenever the species was captured EARLIER than the prose
+            is built. self._species maps a POSITION to whoever occupies it
+            NOW, so re-resolving a position token at flush time silently reads
+            the wrong Pokemon if the slot changed in between. Live 2026-07-27:
+            Garganacl's Ice Punch knocked out our Darkrai, Gholdengo switched
+            into p1a before the deferred flush ran, and the beat went out as
+            'Garganacl's Ice Punch knocked out our Gholdengo'. The side is
+            still taken from the position token, which is stable."""
+            if not species or not s:
+                return species
+            if (species in self._team_species.get("p1", ())
+                    and species in self._team_species.get("p2", ())):
+                return f"{'our' if s == 'us' else 'their'} {species}"
+            return species
+
         def qual(token) -> str:
             """Species display, prefixed 'our '/'their ' in a mirror MATCH —
             when the same species is on BOTH teams' rosters (self._team_species,
@@ -411,15 +474,12 @@ class ProtocolScanner:
             FRACTURE called our fainted Clefable 'their Cleric' while their
             Toxapex was in. (The earlier version only checked the opposing
             active slot and missed exactly that case.) Non-mirror prose is
-            byte-unchanged. Needs role (side) known; role=None (eval) no-ops."""
-            species = name_of(token)
-            s = side_of(token)
-            if not s:
-                return species
-            if (species in self._team_species.get("p1", ())
-                    and species in self._team_species.get("p2", ())):
-                return f"{'our' if s == 'us' else 'their'} {species}"
-            return species
+            byte-unchanged. Needs role (side) known; role=None (eval) no-ops.
+
+            Safe ONLY when the slot still holds the mon you mean — i.e. at the
+            moment the line is scanned. For anything deferred, resolve the
+            species up front and call qual_species."""
+            return qual_species(name_of(token), side_of(token))
 
         def flush():
             nonlocal cur
@@ -432,11 +492,16 @@ class ProtocolScanner:
                 cur = None
                 return
             # qualified display names (our/their in a mirror) for PROSE only;
-            # cur['mover']/['target'] stay bare species for data + matching
-            mover_disp = (qual(cur["mover_pos"]) if cur.get("mover_pos")
-                          else cur["mover"])
-            target_disp = (qual(cur["target_pos"]) if cur.get("target_pos")
-                           else cur.get("target"))
+            # cur['mover']/['target'] stay bare species for data + matching.
+            # Species come from cur (captured when the move was scanned), NOT
+            # from re-resolving the position token: flush() is DEFERRED to the
+            # next move, and a faint + switch-in repoints the slot before it
+            # runs. Side still comes from the token, which does not move.
+            mover_disp = (qual_species(cur["mover"], side_of(cur["mover_pos"]))
+                          if cur.get("mover_pos") else cur["mover"])
+            target_disp = (qual_species(cur.get("target"),
+                                        side_of(cur["target_pos"]))
+                           if cur.get("target_pos") else cur.get("target"))
             move_name = cur["move"]
             if cur.get("via"):
                 move_name += f" (via {cur['via']})"
@@ -639,11 +704,18 @@ class ProtocolScanner:
                 by = _from_cause(sm[4:])
                 if by in ("Trick", "Switcheroo"):
                     flush()
-                    out.append(Event(
-                        "item_tricked",
-                        f"{qual(sm[2])} was handed a {sm[3]} by {by}",
-                        side=side_of(sm[2]), notable=True,
-                        data={"mon": name_of(sm[2]), "item": sm[3]}))
+                    half = (name_of(sm[2]), sm[3], side_of(sm[2]),
+                            qual(sm[2]))
+                    if pending_trick is None:
+                        # a swap emits TWO -item lines, one per side. Hold the
+                        # first: emitting both would spawn two beats for one
+                        # play, i.e. two responses from the duo.
+                        pending_trick = (by, half)
+                    else:
+                        out.append(_trick_event(pending_trick[0],
+                                                pending_trick[1], half,
+                                                self._last_move))
+                        pending_trick = None
                 elif by in ("Thief", "Covet", "Magician", "Pickpocket"):
                     flush()
                     out.append(Event(
@@ -835,6 +907,11 @@ class ProtocolScanner:
                     out.append(Event("field_end", "Trick Room wore off",
                                      data={"condition": cond}))
         flush()
+        if pending_trick is not None:
+            # only one side's item moved (the target held nothing): still one
+            # beat, and it still names who did it
+            out.append(_trick_event(pending_trick[0], pending_trick[1], None,
+                                    self._last_move))
         return out
 
 

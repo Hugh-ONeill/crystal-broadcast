@@ -551,3 +551,61 @@ if __name__ == "__main__":
         fn()
         print(f"ok {name}")
     print(f"\n{len(fns)} tests passed")
+
+
+def test_ko_victim_survives_a_same_batch_switch_in():
+    """Regression (live 2026-07-27): flush() is DEFERRED to the next move, so
+    a faint followed by the replacement switching into the same slot used to
+    repoint the position token before the prose was built. The beat went out
+    as 'Garganacl's Ice Punch knocked out our Gholdengo' when it was Darkrai
+    that died and Gholdengo was the mon that replaced it."""
+    sc = ProtocolScanner()
+    evs = sc.scan([
+        ["", "switch", "p1a: Darkrai", "Darkrai", "4/100"],
+        ["", "move", "p2a: Garganacl", "Ice Punch", "p1a: Darkrai"],
+        ["", "-damage", "p1a: Darkrai", "0 fnt"],
+        ["", "faint", "p1a: Darkrai"],
+        # the replacement takes the SAME slot before anything flushes
+        ["", "switch", "p1a: Gholdengo", "Gholdengo, tera:Steel", "69/100"],
+    ], role="p1")
+    kos = [e for e in evs if e.type == "ko"]
+    assert len(kos) == 1
+    assert "Darkrai" in kos[0].prose
+    assert "Gholdengo" not in kos[0].prose
+    assert kos[0].data["target"] == "Darkrai"
+
+
+def test_trick_is_one_beat_and_names_its_user():
+    """A swap emits two -item lines. Two beats meant two responses from the
+    duo for a single play, and the passive wording ('X was handed a Choice
+    Scarf by Trick') let FRACTURE narrate OUR play as the opponent's."""
+    sc = ProtocolScanner()
+    evs = sc.scan([
+        ["", "move", "p1a: Gholdengo", "Trick", "p2a: Garganacl"],
+        ["", "-activate", "p1a: Gholdengo", "move: Trick",
+         "[of] p2a: Garganacl"],
+        ["", "-item", "p2a: Garganacl", "Choice Scarf", "[from] move: Trick"],
+        ["", "-item", "p1a: Gholdengo", "Leftovers", "[from] move: Trick"],
+    ], role="p1")
+    tricks = [e for e in evs if e.type == "item_tricked"]
+    assert len(tricks) == 1, "one play must not spawn two beats"
+    ev = tricks[0]
+    assert ev.side == "us"                       # OUR play, not theirs
+    assert "Gholdengo used Trick" in ev.prose
+    assert "Garganacl" in ev.prose
+    assert "Choice Scarf" in ev.prose and "Leftovers" in ev.prose
+    assert ev.data.get("user") == "Gholdengo"
+    assert classify(ev) is not None
+
+
+def test_trick_with_one_sided_item_still_names_its_user():
+    """Target held nothing: still one beat, still says who did it."""
+    sc = ProtocolScanner()
+    evs = sc.scan([
+        ["", "move", "p1a: Gholdengo", "Trick", "p2a: Garganacl"],
+        ["", "-item", "p2a: Garganacl", "Choice Scarf", "[from] move: Trick"],
+    ], role="p1")
+    tricks = [e for e in evs if e.type == "item_tricked"]
+    assert len(tricks) == 1
+    assert "Gholdengo" in tricks[0].prose
+    assert "Choice Scarf" in tricks[0].prose
