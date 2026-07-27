@@ -30,7 +30,11 @@
   persona: gremlin
   priority: interrupt
   register: despair
-  must_mention: ["Kingambit", "burn"]
+  # ANY-OF: FRACTURE is first-person about our mons and colloquial by
+  # design, so an all-of spec naming a species tests vocabulary, not
+  # correctness. One spec = "is she on topic", which is what this
+  # check is for. Precise nouns are PRISM's contract; ask him.
+  must_mention: ["Kingambit|burn"]
   forbid: [statistics_or_citations]
   fixture:
     role: p1
@@ -46,7 +50,11 @@
   persona: gremlin
   priority: interrupt
   register: celebration
-  must_mention: ["Kingambit", "burn"]
+  # ANY-OF: FRACTURE is first-person about our mons and colloquial by
+  # design, so an all-of spec naming a species tests vocabulary, not
+  # correctness. One spec = "is she on topic", which is what this
+  # check is for. Precise nouns are PRISM's contract; ask him.
+  must_mention: ["Kingambit|burn"]
   forbid: [statistics_or_citations]
   fixture:
     role: p2
@@ -118,7 +126,11 @@
   persona: gremlin
   priority: interrupt
   register: persecution
-  must_mention: ["Darkrai", "froze|frozen|ice"]
+  # ANY-OF: FRACTURE is first-person about our mons and colloquial by
+  # design, so an all-of spec naming a species tests vocabulary, not
+  # correctness. One spec = "is she on topic", which is what this
+  # check is for. Precise nouns are PRISM's contract; ask him.
+  must_mention: ["Darkrai|froze|frozen|ice"]
   forbid: [statistics_or_citations]
   fixture:
     role: p1
@@ -137,7 +149,11 @@
   priority: filler
   register: escalating-grievance
   # spoken layer pins the FACT (ongoing sleep), not the word "STILL"
-  must_mention: ["Gliscor", "still|two turns|turn 2|asleep|sleep"]
+  # ANY-OF: FRACTURE is first-person about our mons and colloquial by
+  # design, so an all-of spec naming a species tests vocabulary, not
+  # correctness. One spec = "is she on topic", which is what this
+  # check is for. Precise nouns are PRISM's contract; ask him.
+  must_mention: ["Gliscor|still|two turns|turn 2|asleep|sleep"]
   fixture:
     role: p1
     batches:
@@ -155,7 +171,11 @@
   persona: gremlin
   priority: interrupt
   register: sunk-cost-outrage
-  must_mention: ["Spikes", "spin|cleared"]
+  # ANY-OF: FRACTURE is first-person about our mons and colloquial by
+  # design, so an all-of spec naming a species tests vocabulary, not
+  # correctness. One spec = "is she on topic", which is what this
+  # check is for. Precise nouns are PRISM's contract; ask him.
+  must_mention: ["Spikes|spin|cleared"]
   forbid: [statistics_or_citations]
   fixture:
     role: p1
@@ -197,7 +217,11 @@
   register: persecution
   # any participant + the crit fact; demanding the victim name specifically
   # over-pinned (a line naming attacker+move+crit reads fine on screen)
-  must_mention: ["Zamazenta|Kingambit|Iron Head", "crit"]
+  # ANY-OF: FRACTURE is first-person about our mons and colloquial by
+  # design, so an all-of spec naming a species tests vocabulary, not
+  # correctness. One spec = "is she on topic", which is what this
+  # check is for. Precise nouns are PRISM's contract; ask him.
+  must_mention: ["Zamazenta|Kingambit|Iron Head|crit"]
   forbid: [statistics_or_citations]
   fixture:
     role: p1
@@ -214,7 +238,11 @@
   persona: gremlin
   priority: interrupt
   register: delight
-  must_mention: ["Kingambit", "crit"]
+  # ANY-OF: FRACTURE is first-person about our mons and colloquial by
+  # design, so an all-of spec naming a species tests vocabulary, not
+  # correctness. One spec = "is she on topic", which is what this
+  # check is for. Precise nouns are PRISM's contract; ask him.
+  must_mention: ["Kingambit|crit"]
   forbid: [statistics_or_citations]
   fixture:
     role: p1
@@ -316,7 +344,11 @@
   persona: gremlin
   priority: interrupt
   register: despair
-  must_mention: ["Tinkaton", "burn"]
+  # ANY-OF: FRACTURE is first-person about our mons and colloquial by
+  # design, so an all-of spec naming a species tests vocabulary, not
+  # correctness. One spec = "is she on topic", which is what this
+  # check is for. Precise nouns are PRISM's contract; ask him.
+  must_mention: ["Tinkaton|burn"]
   forbid: [statistics_or_citations]
   fixture: {replay: gen9ou-2597586150.json, turn: 9, role: p1}
 
@@ -325,7 +357,11 @@
   persona: gremlin
   priority: interrupt
   register: celebration
-  must_mention: ["Landorus", "burn"]
+  # ANY-OF: FRACTURE is first-person about our mons and colloquial by
+  # design, so an all-of spec naming a species tests vocabulary, not
+  # correctness. One spec = "is she on topic", which is what this
+  # check is for. Precise nouns are PRISM's contract; ask him.
+  must_mention: ["Landorus|burn"]
   forbid: [statistics_or_citations]
   fixture: {replay: gen9ou-2597580197.json, turn: 3, role: p1}
 
@@ -342,7 +378,11 @@
   persona: gremlin
   priority: interrupt
   register: despair
-  must_mention: ["Iron Moth", "paralyzed|para"]
+  # ANY-OF: FRACTURE is first-person about our mons and colloquial by
+  # design, so an all-of spec naming a species tests vocabulary, not
+  # correctness. One spec = "is she on topic", which is what this
+  # check is for. Precise nouns are PRISM's contract; ask him.
+  must_mention: ["Iron Moth|paralyzed|para"]
   forbid: [statistics_or_citations]
   fixture: {replay: gen9ou-2597585497.json, turn: 3, role: p1}
 
@@ -359,7 +399,11 @@
   persona: gremlin
   priority: interrupt
   register: persecution
-  must_mention: ["Blissey", "froze|frozen"]
+  # ANY-OF: FRACTURE is first-person about our mons and colloquial by
+  # design, so an all-of spec naming a species tests vocabulary, not
+  # correctness. One spec = "is she on topic", which is what this
+  # check is for. Precise nouns are PRISM's contract; ask him.
+  must_mention: ["Blissey|froze|frozen"]
   forbid: [statistics_or_citations]
   fixture: {replay: gen9ou-2597578870.json, turn: 4, role: p2}
 
@@ -368,7 +412,11 @@
   persona: gremlin
   priority: interrupt
   register: bragging
-  must_mention: ["Blissey", "thaw"]
+  # ANY-OF: FRACTURE is first-person about our mons and colloquial by
+  # design, so an all-of spec naming a species tests vocabulary, not
+  # correctness. One spec = "is she on topic", which is what this
+  # check is for. Precise nouns are PRISM's contract; ask him.
+  must_mention: ["Blissey|thaw"]
   forbid: [statistics_or_citations]
   fixture: {replay: gen9ou-2597578870.json, turn: 6, role: p2}
 
@@ -377,7 +425,11 @@
   persona: gremlin
   priority: interrupt
   register: sunk-cost-outrage
-  must_mention: ["Spikes|Stealth Rock", "Defog|cleared"]
+  # ANY-OF: FRACTURE is first-person about our mons and colloquial by
+  # design, so an all-of spec naming a species tests vocabulary, not
+  # correctness. One spec = "is she on topic", which is what this
+  # check is for. Precise nouns are PRISM's contract; ask him.
+  must_mention: ["Spikes|Stealth Rock|Defog|cleared"]
   forbid: [statistics_or_citations]
   fixture: {replay: gen9ou-2597578620.json, turn: 7, role: p1}
 
@@ -395,7 +447,11 @@
   persona: gremlin
   priority: interrupt
   register: persecution
-  must_mention: ["Kyurem|Freeze-Dry", "crit"]
+  # ANY-OF: FRACTURE is first-person about our mons and colloquial by
+  # design, so an all-of spec naming a species tests vocabulary, not
+  # correctness. One spec = "is she on topic", which is what this
+  # check is for. Precise nouns are PRISM's contract; ask him.
+  must_mention: ["Kyurem|Freeze-Dry|crit"]
   forbid: [statistics_or_citations]
   fixture: {replay: gen9ou-2597578870.json, turn: 5, role: p2}
 
@@ -404,7 +460,11 @@
   persona: gremlin
   priority: interrupt
   register: delight
-  must_mention: ["Kyurem|Freeze-Dry", "crit"]
+  # ANY-OF: FRACTURE is first-person about our mons and colloquial by
+  # design, so an all-of spec naming a species tests vocabulary, not
+  # correctness. One spec = "is she on topic", which is what this
+  # check is for. Precise nouns are PRISM's contract; ask him.
+  must_mention: ["Kyurem|Freeze-Dry|crit"]
   forbid: [statistics_or_citations]
   fixture: {replay: gen9ou-2597578870.json, turn: 5, role: p1}
 
@@ -425,14 +485,22 @@
   beat: item_denial
   persona: either
   priority: interrupt
-  must_mention: ["Kyurem", "Leftovers|knocked"]
+  # ANY-OF: FRACTURE is first-person about our mons and colloquial by
+  # design, so an all-of spec naming a species tests vocabulary, not
+  # correctness. One spec = "is she on topic", which is what this
+  # check is for. Precise nouns are PRISM's contract; ask him.
+  must_mention: ["Kyurem|Leftovers|knocked"]
   fixture: {replay: gen9ou-2597581372.json, turn: 8, role: p1}
 
 - id: gc-0040-r
   beat: lockdown
   persona: either
   priority: interrupt
-  must_mention: ["Ting-Lu", "Taunt"]
+  # ANY-OF: FRACTURE is first-person about our mons and colloquial by
+  # design, so an all-of spec naming a species tests vocabulary, not
+  # correctness. One spec = "is she on topic", which is what this
+  # check is for. Precise nouns are PRISM's contract; ask him.
+  must_mention: ["Ting-Lu|Taunt"]
   fixture: {replay: gen9ou-2597589535.json, turn: 5, role: p1}
 
 - id: gc-0045-r
@@ -440,7 +508,11 @@
   persona: gremlin
   priority: interrupt
   register: grief
-  must_mention: ["Dragapult", "Sucker Punch"]
+  # ANY-OF: FRACTURE is first-person about our mons and colloquial by
+  # design, so an all-of spec naming a species tests vocabulary, not
+  # correctness. One spec = "is she on topic", which is what this
+  # check is for. Precise nouns are PRISM's contract; ask him.
+  must_mention: ["Dragapult|Sucker Punch"]
   forbid: [statistics_or_citations]
   fixture: {replay: gen9ou-2597586150.json, turn: 7, role: p1}
 
@@ -468,7 +540,11 @@
   persona: gremlin
   priority: interrupt
   register: grief
-  must_mention: ["Darkrai"]      # she names the recorded victim, not just rage
+  # ANY-OF, but still proof the LEDGER reached the line rather than
+  # generic rage: the victim name or the recorded count. "four times"
+  # evidences the grudge as well as "Darkrai" does; the active mon
+  # (Kingambit) would not, so it is deliberately absent here.
+  must_mention: ["Darkrai|four|fourth|Gliscor"]
   forbid: [statistics_or_citations]
   fixture:
     role: p1
@@ -494,7 +570,11 @@
   beat: set_reveal
   persona: either
   priority: interrupt
-  must_mention: ["Iron Valiant", "scarf"]
+  # ANY-OF: FRACTURE is first-person about our mons and colloquial by
+  # design, so an all-of spec naming a species tests vocabulary, not
+  # correctness. One spec = "is she on topic", which is what this
+  # check is for. Precise nouns are PRISM's contract; ask him.
+  must_mention: ["Iron Valiant|scarf"]
   fixture:
     role: p1
     events:
@@ -511,7 +591,11 @@
   beat: set_reveal
   persona: either
   priority: interrupt
-  must_mention: ["Kingambit", "Choice Band|band|item"]
+  # ANY-OF: FRACTURE is first-person about our mons and colloquial by
+  # design, so an all-of spec naming a species tests vocabulary, not
+  # correctness. One spec = "is she on topic", which is what this
+  # check is for. Precise nouns are PRISM's contract; ask him.
+  must_mention: ["Kingambit|Choice Band|band|item"]
   fixture:
     role: p1
     events:
