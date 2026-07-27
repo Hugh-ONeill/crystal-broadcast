@@ -615,3 +615,45 @@ def test_without_pts_the_single_slot_still_skips():
     c._pending_turn = {"text": "[BATTLE T2] new", "beats": [], "hud": None}
     assert c._pending_turn["text"].endswith("new")
     assert c._pace_stats["dropped"] == 1
+
+
+def test_request_body_turns_thinking_off_without_a_proxy():
+    """The caster used to reach Ollama through ollama_nothink_proxy.py on
+    :11435, which existed only because AIRI would not send this field. gemma4
+    is thinking-capable and Ollama defaults it ON, which leaked reasoning into
+    the spoken line and truncated replies. On /v1 the only lever is
+    reasoning_effort:"none" (Ollama >= 0.32); `think:false` is native-API only.
+    """
+    from showdown.caster import DEFAULT_UPSTREAM
+
+    assert DEFAULT_UPSTREAM.endswith(":11434"), "talk to Ollama directly"
+
+    c = Caster(DEFAULT_UPSTREAM, "test-model", expert_url=None)
+    sent = {}
+
+    class _Resp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def read(self):
+            return json.dumps(
+                {"choices": [{"message": {"content": "line"}}]}).encode()
+
+    def fake_urlopen(req, timeout=None):
+        sent["url"] = req.full_url
+        sent["body"] = json.loads(req.data)
+        return _Resp()
+
+    import urllib.request
+    real, urllib.request.urlopen = urllib.request.urlopen, fake_urlopen
+    try:
+        c._generate_sync("PRISM", {"text": "[BATTLE T1] x", "beats": [],
+                                   "hud": None})
+    finally:
+        urllib.request.urlopen = real
+
+    assert sent["body"]["reasoning_effort"] == "none"
+    assert ":11434" in sent["url"] and ":11435" not in sent["url"]

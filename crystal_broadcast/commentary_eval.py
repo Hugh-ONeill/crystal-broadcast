@@ -387,7 +387,7 @@ def main():
                     default="director")
     ap.add_argument("-e", "--entries", default=None,
                     help="comma-separated gc-ids to run (default: all)")
-    ap.add_argument("--upstream", default="http://127.0.0.1:11435")
+    ap.add_argument("--upstream", default="http://127.0.0.1:11434")
     ap.add_argument("--model", default="gemma4:26b-a4b-it-q4_K_M")
     args = ap.parse_args()
 

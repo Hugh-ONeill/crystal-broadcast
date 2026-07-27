@@ -23,7 +23,7 @@ a newer turn beat replaces an unspoken older one. MATCH START / RESULT
 always speak.
 
 Run:  .venv/bin/python showdown/caster.py [--port 8131]
-      [--upstream http://127.0.0.1:11435] [--model ...]
+      [--upstream http://127.0.0.1:11434] [--model ...]
 """
 from __future__ import annotations
 
@@ -54,7 +54,13 @@ _SELF_LABEL = re.compile(r"^\s*(?:(?:PRISM|FRACTURE)\s*:\s*)+", re.I)
 
 PERSONA_DIR = Path(__file__).parent / "personas"
 DEFAULT_PORT = 8131
-DEFAULT_UPSTREAM = "http://127.0.0.1:11435"
+# Ollama direct. We used to go through ollama_nothink_proxy.py on :11435,
+# which existed ONLY because AIRI would not send `reasoning_effort` on its
+# /v1 calls and gemma4 defaults to thinking-on (reasoning leaked into the
+# spoken line and ate the token budget). The caster is our own client, so it
+# just sends the field — see _generate_sync. Needs Ollama >= 0.32, which is
+# where /v1 started mapping reasoning_effort:"none" to thinking off.
+DEFAULT_UPSTREAM = "http://127.0.0.1:11434"
 DEFAULT_MODEL = "gemma4:26b-a4b-it-q4_K_M"
 DEFAULT_GRUDGES = Path(__file__).parent / "grudges.json"
 DEFAULT_EXPERT = "http://127.0.0.1:8001"
@@ -664,6 +670,12 @@ class Caster:
             "model": self.model,
             "messages": self._prompt(persona, item, nudge=nudge),
             "stream": False,
+            # thinking OFF. gemma4 is thinking-capable and Ollama defaults it
+            # ON, which leaked reasoning into the spoken line and truncated
+            # replies by eating the token budget. Only the NATIVE /api/chat
+            # honours `think:false`; on /v1 the lever is reasoning_effort,
+            # and only "none" (Ollama >= 0.32) turns it off.
+            "reasoning_effort": "none",
             **knobs,
         }).encode()
         req = urllib.request.Request(
