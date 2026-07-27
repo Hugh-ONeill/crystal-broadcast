@@ -294,7 +294,12 @@ def run_caster(entry: dict, final, upstream: str, model: str) -> list[str]:
     caster = Caster(upstream, model, expert_url=None)
     spoken: list[tuple[str, str]] = []
 
-    async def collect(beat_text, persona, line, hud):
+    async def collect(beat_text, persona, line, hud, citations=None):
+        # signature must track Caster.publish. It drifted once already: the
+        # citations arg landed with the sources card and this stub was not
+        # updated, so every caster-level run died with a TypeError on the
+        # FIRST entry — the LLM-layer gate was silently dead for a week
+        # because this level is only ever run by hand.
         spoken.append((persona, line))
 
     caster.publish = collect
