@@ -47,6 +47,7 @@ DEFAULT_ROOT = (Path.home() / "Developer/grimoire/pokemon-showdown-client"
 FALLBACK = "index-new.html"
 BROADCAST_PATH = "/broadcast-client.html"
 BROADCAST_CSS_PATH = "/broadcast-client.css"
+BROADCAST_CLOCK_PATH = "/broadcast-clock.js"
 BROADCAST_SOURCE = "testclient-new.html"
 HERE = Path(__file__).parent
 
@@ -58,6 +59,7 @@ HERE = Path(__file__).parent
 # owns the actual rule.
 SIZER = """
 <link rel="stylesheet" href="%s">
+<script src="%s"></script>
 <script>
 (function () {
 	function fit() {
@@ -72,7 +74,7 @@ SIZER = """
 	fit();
 })();
 </script>
-""" % BROADCAST_CSS_PATH
+""" % (BROADCAST_CSS_PATH, BROADCAST_CLOCK_PATH)
 
 
 class ClientHandler(SimpleHTTPRequestHandler):
@@ -84,6 +86,10 @@ class ClientHandler(SimpleHTTPRequestHandler):
         if path == BROADCAST_CSS_PATH:
             return self._send_bytes(
                 (HERE / "broadcast_client.css").read_bytes(), "text/css")
+        if path == BROADCAST_CLOCK_PATH:
+            return self._send_bytes(
+                (HERE / "broadcast_clock.js").read_bytes(),
+                "application/javascript")
         if path == BROADCAST_PATH:
             return self._send_bytes(self._broadcast_html(), "text/html")
         return super().do_GET()
