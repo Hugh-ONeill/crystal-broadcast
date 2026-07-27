@@ -48,6 +48,26 @@
     gap: 10px;
     pointer-events: none;
   }
+  /* PANEL MODE (?panel): the page is a strip BELOW the battle rather than a
+     transparent layer over it, so fill the strip instead of floating a
+     lower-third. broadcast.html uses this; an OBS browser source does not,
+     and keeps the floating behaviour above. */
+  body.panel #stage {
+    left: 0; bottom: 0; top: 0; right: 0;
+    transform: none;
+    width: auto;
+    padding: 12px 22px;
+    justify-content: flex-end;   /* newest line sits at the strip's bottom */
+    gap: 8px;
+    overflow: hidden;
+  }
+  body.panel #card {
+    /* it is the panel now, not a card floating over a scene */
+    box-shadow: none;
+    background: rgba(12, 14, 22, 0.55);
+  }
+  body.panel #desk { align-self: flex-start; }
+  body.panel #moment { align-self: flex-start; }
 
   /* --- moment banner: transient punctuation (KO / Tera) ---------------- */
   #moment {
@@ -235,6 +255,12 @@
     ["behind in this", "behind"],         ["deep trouble", "deep trouble"],
     ["nearly gone", "nearly gone"],
   ];
+
+  // ?panel — laid out as a strip under the battle (broadcast.html) instead of
+  // a transparent overlay floating over it (OBS browser source).
+  if (new URLSearchParams(location.search).has("panel")) {
+    document.body.classList.add("panel");
+  }
 
   const $ = (id) => document.getElementById(id);
   const card = $("card"), exchange = $("exchange"), sources = $("sources");

@@ -4,12 +4,17 @@
 <meta charset="utf-8">
 <title>Prism Broadcast</title>
 <style>
+  /* STACKED, not overlaid: the commentary sits UNDER the scene rather than
+     across the bottom of it. The scene is a fixed 640x360 stage that the
+     injected sizer scales to whatever box it gets, so shrinking the battle
+     region just rescales it — nothing is cropped. --panel is the strip
+     height; override with ?panel=NNN. */
+  :root { --panel: 300px; }
   html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
-  iframe { position: fixed; inset: 0; width: 100%; height: 100%; border: 0; }
-  /* the battle sits underneath; the caption layer is transparent and
-     click-through so the battle below stays fully interactive */
-  #battle  { z-index: 0; }
-  #caption { z-index: 1; background: transparent; pointer-events: none; }
+  iframe { position: fixed; left: 0; width: 100%; border: 0; }
+  #battle  { top: 0; height: calc(100% - var(--panel)); }
+  #caption { bottom: 0; height: var(--panel); background: transparent;
+             pointer-events: none; }
   #hint {
     position: fixed; inset: 0; display: flex; align-items: center;
     justify-content: center; color: #8aa; font: 16px system-ui;
@@ -19,7 +24,7 @@
 </head>
 <body>
   <iframe id="battle" title="battle"></iframe>
-  <iframe id="caption" src="/overlay.html" title="commentary"></iframe>
+  <iframe id="caption" src="/overlay.html?panel" title="commentary"></iframe>
   <div id="hint">Add <code>?battle=battle-gen9ou-NNNN</code> to the URL to load a match.<br>
     Needs the self-hosted client: <code>python showdown/serve_client.py</code></div>
 <script>
@@ -42,6 +47,10 @@
   // since PSRouter picks subscribeHash() when the path ends .html.
   // Pass ?chrome=1 to load the unstyled client instead (debugging).
   const qs = new URLSearchParams(location.search);
+  const panel = parseInt(qs.get("panel") || "", 10);
+  if (panel > 0) {
+    document.documentElement.style.setProperty("--panel", panel + "px");
+  }
   const room = qs.get("battle");
   if (room) {
     const client = (qs.get("client") || "http://localhost:8127").replace(/\/$/, "");
