@@ -534,3 +534,54 @@ if __name__ == "__main__":
         fn()
         print(f"ok {name}")
     print(f"\n{len(fns)} tests passed")
+
+
+def test_pts_holds_publish_until_the_viewer_reaches_the_turn():
+    """Wiring test: generation must happen FIRST (so the lag pays for it),
+    then publish waits on the presentation clock. Deterministic because the
+    viewer is parked behind the beat's turn."""
+    from showdown.pts_clock import PresentationClock
+
+    pts = PresentationClock(max_hold=5)
+    pts.ingest({"kind": "presented", "line": "|turn|3", "t": 0})
+    c = Caster("http://unused", "test-model", expert_url=None, pts=pts)
+
+    order = []
+    c._generate_sync = lambda persona, item: (order.append("gen") or "line")
+
+    async def scenario():
+        async def publish(*a, **kw):
+            order.append("publish")
+        c.publish = publish
+
+        async def advance():
+            await asyncio.sleep(0.05)
+            assert order == ["gen"], "must generate before waiting, not after"
+            pts.ingest({"kind": "presented", "line": "|turn|9", "t": 0})
+
+        await asyncio.gather(
+            c.speak({"text": "[BATTLE T9] something happened",
+                     "beats": [], "hud": None}),
+            advance())
+
+    asyncio.run(scenario())
+    assert order == ["gen", "publish"]
+    assert pts.holds == 1, "the beat should have been held"
+
+
+def test_pts_absent_publishes_immediately():
+    """No --pts-url: publishing is unchanged."""
+    c = Caster("http://unused", "test-model", expert_url=None)
+    assert c.pts is None
+    published = []
+    c._generate_sync = lambda persona, item: "line"
+
+    async def scenario():
+        async def publish(*a, **kw):
+            published.append(a[1])
+        c.publish = publish
+        await c.speak({"text": "[BATTLE T9] something happened",
+                       "beats": [], "hud": None})
+
+    asyncio.run(scenario())
+    assert published == ["PRISM"]

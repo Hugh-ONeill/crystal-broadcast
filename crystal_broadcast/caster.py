@@ -46,6 +46,7 @@ import re
 
 from showdown.airi_bridge import _sanitize, _unwrap
 from showdown.grudge_ledger import GrudgeLedger
+from showdown.pts_clock import PresentationClock
 
 # the model mimics the transcript format and prefixes its own line with a
 # speaker label (sometimes stacked: "PRISM: PRISM: ..."); strip them all
@@ -158,6 +159,13 @@ _STALL_STOP = frozenset(
     "through into over with for so as not no do dont one".split())
 
 
+def _turn_of(beat: str):
+    """Turn number out of a beat's '[BATTLE T14]' tag, or None (MATCH START
+    has no turn). Same shape commentary_overlay.py parses."""
+    m = re.search(r"\bT(\d+)\b", beat)
+    return int(m.group(1)) if m else None
+
+
 def _content_bigrams(line: str) -> set:
     words = re.findall(r"[a-z']+", line.lower())
     content = [w for w in words if len(w) > 2 and w not in _STALL_STOP]
@@ -209,9 +217,15 @@ class Caster:
                  grudge_path: str | None = None,
                  expert_url: str | None = DEFAULT_EXPERT,
                  speech_budget: float | None = None,
-                 duration_fn=None):
+                 duration_fn=None,
+                 pts=None):
         self.upstream = upstream
         self.model = model
+        # PTS scheduling: a PresentationClock, or None to publish at engine
+        # time exactly as before. See pts_clock.py — the hold sits AFTER
+        # generation so the ~8s of generation is spent inside the lag we
+        # already have rather than added to it.
+        self.pts = pts
         # Speech pacing, both off by default so behaviour is unchanged until a
         # speech layer exists. duration_fn(persona, line) -> seconds is the only
         # contract the TTS side has to meet; it is called ON THE EVENT LOOP, so
@@ -282,7 +296,8 @@ class Caster:
         """Zero the per-match pacing counters (call at MATCH START)."""
         self._pace_stats = {"voiced": 0, "dropped": 0, "stale_ms": [],
                             "turnaround_ms": [], "speech_s": [],
-                            "preflight_drops": 0, "overruns": 0}
+                            "preflight_drops": 0, "overruns": 0,
+                            "pts_held_s": []}
 
     def _speaking_backlog(self) -> float:
         """Seconds of queued speech still to play. 0.0 with no speech layer."""
@@ -311,6 +326,10 @@ class Caster:
                f"{pct(stale, 0.5):.0f}ms / p90 {pct(stale, 0.9):.0f}ms / max "
                f"{max(stale) if stale else 0:.0f}ms; generation median "
                f"{pct(turn, 0.5):.0f}ms / p90 {pct(turn, 0.9):.0f}ms")
+        held = s.get("pts_held_s") or []
+        if held:
+            msg += (f"; PTS held {len(held)} beat(s), median "
+                    f"{pct(held, 0.5):.1f}s / max {max(held):.1f}s")
         if s["speech_s"]:
             msg += (f"; speech median {pct(s['speech_s'], 0.5):.2f}s / max "
                     f"{max(s['speech_s']):.2f}s; budget overruns "
@@ -866,6 +885,18 @@ class Caster:
                 low = line.lower()
                 citations = [cite for name, _f, cite in item["_facts"]
                              if name in low or cite["label"].lower() in low]
+            # PTS gate: the line is written, now wait for the viewer to
+            # actually reach this turn. Held here rather than before
+            # generation so the lag pays for the generation. [MATCH START]
+            # has no turn and goes out at once; [RESULT] waits for the end of
+            # the battle to be presented, or it spoils the finish while the
+            # audience is still watching the last exchange.
+            if self.pts is not None:
+                held = await self.pts.wait_for(
+                    _turn_of(item["text"]),
+                    final=item["text"].startswith("[RESULT]"))
+                if held > 0.05:
+                    self._pace_stats["pts_held_s"].append(held)
             await self.publish(item["text"], persona, line, item["hud"],
                                citations)
             if secs is not None:
@@ -907,14 +938,28 @@ async def main():
                     help="per-beat wall-clock speech allowance (the beat "
                          "floor). Gates the second voice of a handoff pair. "
                          "Inert until a speech layer supplies durations")
+    ap.add_argument("--pts-url", default=None,
+                    help="presentation-clock feed (e.g. ws://127.0.0.1:8132) "
+                         "— hold each finished line until the VIEWER reaches "
+                         "its turn. Off by default: publishing is unchanged.")
+    ap.add_argument("--pts-max-hold", type=float, default=180.0,
+                    help="never hold a beat longer than this; a closed "
+                         "broadcast page must not mute the commentary")
     ap.add_argument("--expert", default=DEFAULT_EXPERT,
                     help="grounded-rag /retrieve base URL for PRISM's fact "
                          "injection ('off' disables)")
     args = ap.parse_args()
 
+    pts = (PresentationClock(args.pts_url, max_hold=args.pts_max_hold)
+           if args.pts_url else None)
     caster = Caster(args.upstream, args.model, grudge_path=args.grudges,
                     expert_url=None if args.expert == "off" else args.expert,
-                    speech_budget=args.speech_budget)
+                    speech_budget=args.speech_budget, pts=pts)
+    if pts is not None:
+        pts.start()
+        print(f"caster: PTS scheduling on — holding lines until the viewer "
+              f"reaches their turn (feed {args.pts_url}, max hold "
+              f"{args.pts_max_hold:.0f}s)", flush=True)
     if caster.grudges.ledger:
         print(f"caster: loaded {len(caster.grudges.ledger)} grudges "
               f"from {args.grudges}", flush=True)
