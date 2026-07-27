@@ -1,0 +1,6 @@
+Metadata-Version: 2.4
+Name: crystal-broadcast
+Version: 0.1.0
+Summary: AI commentary broadcast system: a beat director, a two-persona caster, and a presentation-clock scheduler for narrating a live Pokemon battle.
+Requires-Python: >=3.12
+Requires-Dist: websockets

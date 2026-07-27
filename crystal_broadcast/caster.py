@@ -324,6 +324,13 @@ class Caster:
         # game produced 5 spoken beats (T1, T6, T12, T23). The queue drains
         # faster than the viewer advances (generation ~8s vs ~13s per
         # presented turn), so it self-corrects rather than growing.
+        # Beat texts seen this match, oldest first. The ungrounded-entity
+        # guard grounds against these as well as the current beat: a line
+        # recalling something from earlier ("that Spore is still on Gliscor")
+        # is legitimate, and production really did show it. Deliberately the
+        # BEATS and not self.transcript — grounding on our own past lines
+        # would let one hallucination legitimise its repeats.
+        self._beat_history: deque = deque(maxlen=40)
         self._pending_queue: deque = deque()
         self.PENDING_QUEUE_MAX = 120
         self._wake = asyncio.Event()
@@ -731,6 +738,57 @@ class Caster:
             return False
         return "critical" not in (item.get("text") or "").lower()
 
+    def _ungrounded_entity(self, line: str, item: dict) -> str | None:
+        """The species/move a line names must be in evidence. Returns the
+        offending name, or None.
+
+        Ported from the gold set's contract check, which the LIVE caster never
+        had — it only carried three narrow guards (crit / synergy / immunity),
+        so a plausible-but-unevidenced mechanic sailed through. Measured live
+        2026-07-27: PRISM said "The halved damage from Multiscale was likely
+        intended to keep Roost viable" on a beat that never mentions
+        Multiscale. Dragonite really does have it, which is exactly what makes
+        it dangerous: true-sounding, unsupported, invisible to every other
+        guard.
+
+        Grounded against the beats seen THIS MATCH, the actives and their
+        known abilities, and any injected expert facts. Case-sensitivity is
+        the trick carried over from the eval: only a properly capitalised
+        occurrence counts, so prose uses of common-word moves ("rest",
+        "protect", "will you") never false-flag. No-ops if poke_env is absent.
+        """
+        try:
+            from crystal_broadcast.game_data import DATA
+            names = DATA.entity_names()
+        except Exception:
+            return None
+        hud = item.get("hud") or {}
+        allowed = " ".join(self._beat_history)
+        allowed += " " + " ".join(str(hud.get(k) or "") for k in
+                                  ("us", "them", "us_ability", "them_ability"))
+        if item.get("_facts"):
+            allowed += " " + " ".join(n for n, _f, _c in item["_facts"])
+        # a status on the board grounds the whole family of moves that inflict
+        # it: naming the move behind a status we are reacting to is not a
+        # hallucination
+        codes = {b.get("data", {}).get("status")
+                 for b in (item.get("beats") or [])}
+        codes = {c for c in codes if c}
+        if codes & {"tox", "psn"}:
+            codes |= {"tox", "psn"}
+        if codes:
+            smoves = DATA.status_moves()
+            for c in codes:
+                allowed += " " + " ".join(smoves.get(c, ()))
+        low, allowed_low = line.lower(), allowed.lower()
+        for name in names:
+            if len(name) < 4:
+                continue
+            nl = name.lower()
+            if nl in low and nl not in allowed_low and name in line:
+                return name
+        return None
+
     @staticmethod
     def _fabricated_miss(line: str, item: dict) -> bool:
         """True when the line claims a move MISSED and the beat never said so.
@@ -813,11 +871,13 @@ class Caster:
     async def speak(self, item: dict):
         if item["text"].startswith("[MATCH START]"):
             self.transcript.clear()
+            self._beat_history.clear()
             self._match_stalls.clear()
         if item["text"].startswith("[RESULT]"):
             self._log_fact_summary()
             self._log_pace_summary()
         print(f"BEAT: {item['text']}", flush=True)
+        self._beat_history.append(item["text"] or "")
         started = time.monotonic()
         if item.get("_queued") is not None:
             # how stale this beat is at the moment it starts being said
@@ -864,6 +924,23 @@ class Caster:
             # (a super-effective/heavy hit narrated as a "crit" that never
             # happened). If the line claims a crit the beat never stated,
             # regenerate once forbidding it.
+            bad = self._ungrounded_entity(line, item) if line else None
+            if bad:
+                try:
+                    raw = await asyncio.to_thread(
+                        self._generate_sync, persona, item,
+                        f"Do NOT mention {bad} — nothing in the beat "
+                        f"establishes it. Name only Pokemon, moves and "
+                        f"abilities the beat itself reports.")
+                    retry = _sanitize(_SELF_LABEL.sub("", raw.strip()))
+                    retry = _fix_species_spelling(retry, item)
+                    if retry and not self._ungrounded_entity(retry, item):
+                        line = retry
+                    else:
+                        print(f"caster: ungrounded {bad!r} survived a regen "
+                              f"({persona})", flush=True)
+                except Exception:
+                    pass
             if line and self._fabricated_miss(line, item):
                 try:
                     raw = await asyncio.to_thread(

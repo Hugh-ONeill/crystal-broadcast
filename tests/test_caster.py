@@ -166,6 +166,9 @@ def test_caption_guard_regens_in_speak():
         return "Make It Rain buys back the tempo we spent."
 
     c._generate_sync = fake_gen
+    # this test is about the CAPTION guard; ground the entity guard so it
+    # does not add a regen of its own
+    c._ungrounded_entity = lambda line, item: None
     asyncio.run(c.speak({"text": "[BATTLE T5] x", "beats": [], "hud": None}))
     assert len(calls) == 2                      # initial + one regen
     assert calls[1][0] is not None              # regen carried a nudge
@@ -545,6 +548,10 @@ def test_pts_holds_publish_until_the_viewer_reaches_the_turn():
     pts = PresentationClock(max_hold=5)
     pts.ingest({"kind": "presented", "line": "|turn|3", "t": 0})
     c = Caster("http://unused", "test-model", expert_url=None, pts=pts)
+    # scheduling test: neutralise the content guards so the only awaits are
+    # generation and the PTS hold (the entity index load is ~1s on first use
+    # and would otherwise let the viewer arrive before the hold starts)
+    c._ungrounded_entity = lambda line, item: None
 
     order = []
     c._generate_sync = lambda persona, item: (order.append("gen") or "line")
@@ -701,3 +708,55 @@ def test_fabricated_miss_is_caught():
     # a miss the beat DID report is fair game, and so is not mentioning one
     assert not Caster._fabricated_miss("THE TOXIC JUST WHIFFED?!", real)
     assert not Caster._fabricated_miss("Stone Edge is our last shot.", pre)
+
+
+def _grounded_item(text, **hud):
+    return {"text": text, "hud": hud, "beats": []}
+
+
+def test_ungrounded_entity_catches_a_plausible_but_unevidenced_ability():
+    """Live 2026-07-27: PRISM said "The halved damage from Multiscale was
+    likely intended to keep Roost viable" on a beat that never mentions it.
+    Dragonite really does have Multiscale, which is what makes it dangerous —
+    true-sounding, unsupported, and invisible to the crit/synergy/immunity
+    guards. Abilities were also missing from the entity index, so the gold
+    set's own version would not have caught this either."""
+    c = Caster("http://unused", "test-model", expert_url=None)
+    beat = ("[BATTLE T17] Last exchange: Dragonite Terastallized into a "
+            "Normal type. Dragonite (47% hp) vs Dragapult (88% hp).")
+    c._beat_history.append(beat)
+    item = _grounded_item(beat, us="Dragonite", them="Dragapult")
+    assert c._ungrounded_entity(
+        "The halved damage from Multiscale keeps Roost viable.", item) == \
+        "Multiscale"
+    assert c._ungrounded_entity(
+        "Gholdengo blocks it with Good as Gold.", item) == "Good as Gold"
+
+
+def test_ungrounded_entity_grounds_on_beats_hud_and_case():
+    c = Caster("http://unused", "test-model", expert_url=None)
+    beat = ("[BATTLE T17] Last exchange: Dragonite Terastallized into a "
+            "Normal type. Dragonite (47% hp) vs Dragapult (88% hp).")
+    c._beat_history.append(beat)
+    item = _grounded_item(beat, us="Dragonite", them="Dragapult")
+    # named in the beat
+    assert c._ungrounded_entity("Dragonite outspeeds Dragapult now.", item) is None
+    # lowercase prose must never trip a common-word move/ability
+    assert c._ungrounded_entity("We rest and protect the lead.", item) is None
+    # the hud's known ability grounds it
+    item2 = _grounded_item(beat, us="Dragonite", them="Dragapult",
+                           us_ability="Multiscale")
+    assert c._ungrounded_entity("Multiscale halves that hit.", item2) is None
+
+
+def test_beat_history_grounds_a_callback_but_not_our_own_lines():
+    """History is BEATS, never self.transcript: grounding on our own past
+    output would let one hallucination legitimise every repeat."""
+    c = Caster("http://unused", "test-model", expert_url=None)
+    c._beat_history.append("[BATTLE T5] Spore put our Gliscor to sleep.")
+    now = "[BATTLE T6] our Gliscor is STILL asleep (turn 2 of it)."
+    c._beat_history.append(now)
+    item = _grounded_item(now, us="Gliscor", them="Amoonguss")
+    assert c._ungrounded_entity("That Spore is still ruining us.", item) is None
+    c.transcript.append(("FRACTURE", "That Hydro Pump was brutal."))
+    assert c._ungrounded_entity("Hydro Pump again!", item) == "Hydro Pump"

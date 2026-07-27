@@ -37,6 +37,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import yaml
 
+from crystal_broadcast.game_data import DATA, GameData  # noqa: F401
 from crystal_broadcast.beat_director import (Director, Event, ProtocolScanner,
                                     TurnContext)
 
@@ -49,53 +50,7 @@ def _norm(s: str) -> str:
     return re.sub(r"[^a-z0-9]", "", s.lower())
 
 
-class GameData:
-    """Lazy GenData wrappers: stats for the director's burn split and the
-    entity index for the ungrounded-entity contract check."""
 
-    def __init__(self):
-        self._gen = None
-        self._status_moves = None
-
-    @property
-    def gen(self):
-        if self._gen is None:
-            from poke_env.data import GenData
-            self._gen = GenData.from_gen(9)
-        return self._gen
-
-    def status_moves(self) -> dict:
-        """{status_code: set(lowercased move display names)} — every move
-        that can inflict each status, from its primary `status` field or its
-        `secondary.status` (so all freezing moves, not just Ice Beam).
-        Used to ground a caster naming the move behind a status on the board.
-        (Tri Attack's 1/3 burn/freeze/para rides an onHit callback with no
-        status field, so it isn't captured — a known, harmless gap.)"""
-        if self._status_moves is None:
-            m: dict = {}
-            for e in self.gen.moves.values():
-                code = e.get("status") or (e.get("secondary") or {}).get(
-                    "status")
-                if code and e.get("name"):
-                    m.setdefault(code, set()).add(e["name"].lower())
-            self._status_moves = m
-        return self._status_moves
-
-    def stats(self, display_name: str):
-        entry = self.gen.pokedex.get(_norm(display_name))
-        if entry and "baseStats" in entry:
-            bs = entry["baseStats"]
-            return bs.get("atk", 0), bs.get("spa", 0)
-        return None
-
-    def entity_names(self) -> list[str]:
-        names = [e["name"] for e in self.gen.pokedex.values() if "name" in e]
-        names += [e["name"] for e in self.gen.moves.values() if "name" in e]
-        # multi-word first so "Iron Valiant" wins over "Iron"
-        return sorted(set(names), key=len, reverse=True)
-
-
-DATA = GameData()
 
 
 def _mention_ok(text: str, spec: str) -> bool:
