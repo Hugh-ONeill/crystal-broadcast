@@ -738,8 +738,12 @@ class ProtocolScanner:
                     # name the user: Knock Off is something somebody DID
                     lm = self._last_move
                     who = lm[0] if lm and lm[1] == "Knock Off" else None
-                    prose = (f"{who} knocked the {item} off {mon_q}" if who
-                             else f"{item} was knocked off {mon_q}")
+                    # lead with "{mover}'s {move}" like the ko/hit branches:
+                    # it names the actor AND grounds the move name. Without
+                    # the literal "Knock Off" in the beat, a caster naming the
+                    # move it actually saw trips the ungrounded-entity guard.
+                    prose = (f"{who}'s {by} took the {item} off {mon_q}"
+                             if who else f"{item} was knocked off {mon_q}")
                     out.append(Event(
                         "item_knocked_off", prose,
                         side=mside, notable=True,

@@ -767,7 +767,8 @@ def test_knock_off_names_who_did_it():
         ["", "-enditem", "p2a: Blissey", "Leftovers", "[from] move: Knock Off"],
     ], role="p1")
     ko = [e for e in evs if e.type == "item_knocked_off"][0]
-    assert "Ting-Lu knocked" in ko.prose and "Blissey" in ko.prose
+    assert "Ting-Lu's Knock Off" in ko.prose and "Blissey" in ko.prose
+    assert "Leftovers" in ko.prose
     assert ko.data["user"] == "Ting-Lu"
 
 

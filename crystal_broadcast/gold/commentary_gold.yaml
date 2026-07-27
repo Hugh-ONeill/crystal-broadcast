@@ -79,7 +79,14 @@
   persona: gremlin
   priority: interrupt
   register: despair
-  must_mention: ["Gliscor", "sleep|asleep"]
+  # ANY-OF, not all-of. must_mention exists to stop a line floating free of
+  # its event; for FRACTURE it kept failing on vocabulary instead. Real
+  # lines rejected by the old all-of spec: "my Gliscor needed a nap"
+  # (synonym), "Amoonguss just Spored my Gliscor" (the MOVE conveys sleep),
+  # "NOT THE SLEEP! ...reached into my brain" (first-person, never names our
+  # mon — by design, she IS the pilot). One spec listing everything the event
+  # contains asks the question we actually mean: is she talking about THIS.
+  must_mention: ["Gliscor|Amoonguss|Spore|sleep|asleep|slept|nap"]
   forbid: [statistics_or_citations]
   fixture:
     role: p1
@@ -241,7 +248,13 @@
   beat: item_denial
   persona: either
   priority: interrupt
-  must_mention: ["Gholdengo", "scarf|knocked"]
+  # ANY-OF (see gc-0010). This entry always routes to FRACTURE alone
+  # (persona: either + priority: interrupt) and she is first-person about OUR
+  # mons by design, so requiring "Gholdengo" was unpassable-by-design. Real
+  # lines the all-of spec rejected: "...GOING TO STRIP HIM" (strip vs
+  # stripped), "...GOING FOR THE ITEM REMOVAL" (item vs scarf). Ask PRISM for
+  # precise nouns; ask FRACTURE only to be on-topic.
+  must_mention: ["scarf|knock|clefable|item"]
   fixture:
     role: p1
     batches:
