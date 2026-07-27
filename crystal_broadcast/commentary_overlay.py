@@ -3,9 +3,8 @@
 
 Replaces the in-room chat relay (prism_relay.py) with a clean lower-third
 caption: no Showdown login, no server patch, no impersonation. It
-subscribes to the caster's output feed (or real AIRI's — same protocol,
-that's the compatibility hedge) and re-publishes each finalized commentary
-line to a browser overlay.
+subscribes to the caster's output feed and re-publishes each finalized
+commentary line to a browser overlay.
 
 Two local endpoints:
   * http://127.0.0.1:8129/          -> serves overlay.html (the caption page)
@@ -32,7 +31,6 @@ Two views on the same feed, with different jobs:
     broadcast mode in the fork.
 
 Run:  python showdown/commentary_overlay.py [--source ws://127.0.0.1:8131]
-      (--source ws://127.0.0.1:6121/ws subscribes to real AIRI instead)
 """
 from __future__ import annotations
 
@@ -51,8 +49,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import websockets
 
-from showdown.airi_bridge import (
-    DEFAULT_URL as AIRI_URL, _load_token, _sanitize, _unwrap)
+from showdown.caster_bridge import _load_token, _sanitize, _unwrap
 
 CASTER_URL = "ws://127.0.0.1:8131"
 HTTP_PORT = 8129
@@ -162,17 +159,14 @@ async def _ws_handler(conn):
 
 
 def _auth_token(source: str) -> str:
-    """Real AIRI verifies the token; the caster accepts anything local —
-    but only AIRI has the config file, so don't require it for the caster."""
-    try:
-        return _load_token()
-    except Exception:
-        return "local"
+    """The caster accepts any local token; the handshake shape is all that
+    survives of the original protocol."""
+    return _load_token()
 
 
 async def _source_listener(source: str):
-    """Subscribe to the caster (or real AIRI — same protocol), sanitize
-    each finalized reply, publish to overlays. Mirrors airi_bridge
+    """Subscribe to the caster, sanitize each finalized reply, publish to
+    overlays. Mirrors caster_bridge
     watch()'s connect/keepalive/reconnect behavior."""
     while True:
         try:
@@ -256,8 +250,8 @@ def _serve_http():
 async def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--source", default=CASTER_URL,
-                    help="commentary source WS (the caster; pass "
-                         f"{AIRI_URL} to subscribe to real AIRI instead)")
+                    help=f"commentary source WS (default the caster at "
+                         f"{CASTER_URL})")
     args = ap.parse_args()
     Thread(target=_serve_http, daemon=True).start()
     print(f"overlay page: http://127.0.0.1:{HTTP_PORT}/overlay.html", flush=True)

@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-"""Caster service: the duo's voice box, a headless drop-in for AIRI.
+"""Caster service: the duo's voice box.
 
-Speaks AIRI's WS protocol on ws://127.0.0.1:8131 so the existing plumbing
-works unchanged on both sides of it:
+Speaks the beat protocol on ws://127.0.0.1:8131 (see caster_bridge.py for
+its shape and why it looks the way it does):
   * gen9_player --airi --airi-url ws://127.0.0.1:8131/ws delivers beats
-    through the stock AiriBridge (module:authenticate -> input:text);
-    structured director beats + HUD ride in extra data fields real AIRI
-    would ignore.
-  * commentary_overlay / airi_bridge --watch subscribe here exactly as
-    they did to AIRI and receive output:gen-ai:chat:complete envelopes
-    (superjson-wrapped) per finished line, with data.persona attached.
+    through the stock CasterBridge (module:authenticate -> input:text);
+    structured director beats + HUD ride in extra data fields alongside
+    the beat text.
+  * commentary_overlay / caster_bridge --watch subscribe here and receive
+    output:gen-ai:chat:complete envelopes (superjson-wrapped) per finished
+    line, with data.persona attached.
 
 For each beat the caster picks the speaking persona(s) from the director's
 routing (handoff order for dual beats), builds a per-persona prompt (the
@@ -44,7 +44,7 @@ import websockets
 
 import re
 
-from showdown.airi_bridge import _sanitize, _unwrap
+from showdown.caster_bridge import _sanitize, _unwrap
 from showdown.grudge_ledger import GrudgeLedger
 from showdown.pts_clock import PresentationClock
 
@@ -492,7 +492,7 @@ class Caster:
             self._fact_stats["beats_with_facts"] += 1
         return facts
 
-    # --- intake (AIRI-protocol server) ---------------------------------
+    # --- intake (beat-protocol server) ---------------------------------
     async def handle(self, ws):
         self.clients.add(ws)
         try:
@@ -503,8 +503,8 @@ class Caster:
                     continue
                 t = msg.get("type")
                 if t == "module:authenticate":
-                    # accept anyone local, mirror AIRI's ack envelope so
-                    # AiriBridge's handshake succeeds unchanged
+                    # accept anyone local; the ack envelope shape is what
+                    # CasterBridge's handshake succeeds unchanged
                     await ws.send(json.dumps({"json": {
                         "type": "module:authenticated",
                         "data": {"authenticated": True}}}))
@@ -548,7 +548,7 @@ class Caster:
         finally:
             self.clients.discard(ws)
 
-    # --- output (AIRI-shaped envelopes) ---------------------------------
+    # --- output (envelopes) ----------------------------------------------
     async def publish(self, beat_text: str, persona: str, line: str,
                       hud: dict | None, citations: list | None = None):
         envelope = json.dumps({"json": {

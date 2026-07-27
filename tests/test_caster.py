@@ -10,7 +10,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from showdown.caster import Caster, _speakers
-from showdown.airi_bridge import _unwrap
+from showdown.caster_bridge import _unwrap
 
 
 def _beat(persona, priority="interrupt", handoff=None, register=None):

@@ -1,6 +1,6 @@
 #!/bin/bash
 # Bring up the Prism commentary panel stack:
-#   * commentary_overlay.py  — feed server (AIRI -> ws://127.0.0.1:8130 + http)
+#   * commentary_overlay.py  — feed server (caster -> ws://127.0.0.1:8130 + http)
 #   * overlay_kitty.sh       — the tiled caption panel (kitty, class prism-panel)
 #
 # Replaces prism_relay.py for a recording: no Showdown login, no server patch.
@@ -16,7 +16,7 @@ PY="$HERE/../.venv/bin/python"
 [ -x "$PY" ] || PY=python3
 LOGDIR="${TMPDIR:-/tmp}"
 
-# 0) caster (detached) — the duo's voice box; headless AIRI stand-in
+# 0) caster (detached) — the duo's voice box
 if ss -tln 2>/dev/null | grep -q ':8131'; then
   echo "caster: already up"
 else
