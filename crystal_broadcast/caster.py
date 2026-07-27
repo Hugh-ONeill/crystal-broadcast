@@ -22,7 +22,7 @@ Latency policy is skip-don't-queue: one pending slot per priority class;
 a newer turn beat replaces an unspoken older one. MATCH START / RESULT
 always speak.
 
-Run:  .venv/bin/python showdown/caster.py [--port 8131]
+Run:  .venv/bin/python crystal_broadcast/caster.py [--port 8131]
       [--upstream http://127.0.0.1:11434] [--model ...]
 """
 from __future__ import annotations
@@ -44,9 +44,9 @@ import websockets
 
 import re
 
-from showdown.caster_bridge import _sanitize, _unwrap
-from showdown.grudge_ledger import GrudgeLedger
-from showdown.pts_clock import PresentationClock
+from crystal_broadcast.caster_bridge import _sanitize, _unwrap
+from crystal_broadcast.grudge_ledger import GrudgeLedger
+from crystal_broadcast.pts_clock import PresentationClock
 
 # the model mimics the transcript format and prefixes its own line with a
 # speaker label (sometimes stacked: "PRISM: PRISM: ..."); strip them all

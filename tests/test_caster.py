@@ -9,8 +9,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from showdown.caster import Caster, _speakers
-from showdown.caster_bridge import _unwrap
+from crystal_broadcast.caster import Caster, _speakers
+from crystal_broadcast.caster_bridge import _unwrap
 
 
 def _beat(persona, priority="interrupt", handoff=None, register=None):
@@ -47,7 +47,7 @@ def test_engine_signal_beats_route_correctly():
     intended voice: the search's certainty reads (worlds collapsing, endgame
     solved) are PRISM's; the 'hold on, thinking' stall is FRACTURE's."""
     from dataclasses import asdict
-    from showdown.beat_director import (classify, Event, world_collapse_prose,
+    from crystal_broadcast.beat_director import (classify, Event, world_collapse_prose,
                                         endgame_solved_prose, deep_think_prose)
 
     def route(kind, prose, **data):
@@ -393,7 +393,7 @@ def test_ping_expert_none_when_disabled():
 
 
 def test_canon_mechanic_maps_ability_ids():
-    from showdown.caster import _canon_mechanic
+    from crystal_broadcast.caster import _canon_mechanic
     # the player resolves abilities to normalized ids; they must map back to
     # the curated display name the expert + citation matcher expect
     assert _canon_mechanic("goodasgold") == "good as gold"
@@ -540,7 +540,7 @@ def test_pts_holds_publish_until_the_viewer_reaches_the_turn():
     """Wiring test: generation must happen FIRST (so the lag pays for it),
     then publish waits on the presentation clock. Deterministic because the
     viewer is parked behind the beat's turn."""
-    from showdown.pts_clock import PresentationClock
+    from crystal_broadcast.pts_clock import PresentationClock
 
     pts = PresentationClock(max_hold=5)
     pts.ingest({"kind": "presented", "line": "|turn|3", "t": 0})
@@ -592,7 +592,7 @@ def test_pts_queues_beats_instead_of_dropping_them():
     slot would discard exactly the turns the viewer is about to watch.
     Measured 2026-07-27: an 83s hold turned a 33-turn game into 5 spoken
     beats. Queue-don't-skip while a clock is attached."""
-    from showdown.pts_clock import PresentationClock
+    from crystal_broadcast.pts_clock import PresentationClock
 
     c = Caster("http://unused", "test-model", expert_url=None,
                pts=PresentationClock(max_hold=1))
@@ -624,7 +624,7 @@ def test_request_body_turns_thinking_off_without_a_proxy():
     the spoken line and truncated replies. On /v1 the only lever is
     reasoning_effort:"none" (Ollama >= 0.32); `think:false` is native-API only.
     """
-    from showdown.caster import DEFAULT_UPSTREAM
+    from crystal_broadcast.caster import DEFAULT_UPSTREAM
 
     assert DEFAULT_UPSTREAM.endswith(":11434"), "talk to Ollama directly"
 

@@ -3,7 +3,7 @@
 
 Drives the SAME classes the live broadcast runs — ProtocolScanner ->
 Director (and, at caster level, the Caster's persona generation) — against
-the executable gold set (showdown/gold/commentary_gold.yaml), fully
+the executable gold set (crystal_broadcast/gold/commentary_gold.yaml), fully
 offline. Philosophy ported from grounded-rag's run_eval: machine-checkable
 assertions, per-dimension report, nonzero exit on any miss.
 
@@ -21,8 +21,8 @@ Two levels:
                      a fail real (the grounded-rag rule).
 
 Usage:
-  .venv/bin/python showdown/commentary_eval.py
-  .venv/bin/python showdown/commentary_eval.py --level caster -e gc-0017
+  python crystal_broadcast/commentary_eval.py
+  python crystal_broadcast/commentary_eval.py --level caster -e gc-0017
 """
 from __future__ import annotations
 
@@ -37,7 +37,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import yaml
 
-from showdown.beat_director import (Director, Event, ProtocolScanner,
+from crystal_broadcast.beat_director import (Director, Event, ProtocolScanner,
                                     TurnContext)
 
 GOLD_DEFAULT = Path(__file__).parent / "gold" / "commentary_gold.yaml"
@@ -115,7 +115,7 @@ def _ctx(raw: dict) -> TurnContext:
 # --- replay-pinned fixtures ------------------------------------------------
 
 # pinned replays are COPIED into gold/replays/ so the gold set stays
-# self-contained and versioned (showdown/replays/ is untracked bulk)
+# self-contained and versioned (crystal-battle's showdown/replays/ is untracked bulk)
 REPLAY_DIR = Path(__file__).parent / "gold" / "replays"
 
 
@@ -289,7 +289,7 @@ def run_director(entry: dict) -> tuple[list, object, list[str]]:
 def run_caster(entry: dict, final, upstream: str, model: str) -> list[str]:
     """Generate real lines for the final decision and check the spoken
     layer: who spoke, what they said, what they must never say."""
-    from showdown.caster import Caster
+    from crystal_broadcast.caster import Caster
 
     caster = Caster(upstream, model, expert_url=None)
     spoken: list[tuple[str, str]] = []
@@ -304,7 +304,7 @@ def run_caster(entry: dict, final, upstream: str, model: str) -> list[str]:
     # grudge entries: load an inline ledger and put the opponent active on
     # the HUD so the caster's FRACTURE-only grudge injection fires
     if fx.get("grudges"):
-        from showdown.grudge_ledger import GrudgeLedger
+        from crystal_broadcast.grudge_ledger import GrudgeLedger
         caster.grudges = GrudgeLedger(fx["grudges"])
     hud = {"turn": turn}
     if fx.get("opp"):

@@ -9,7 +9,7 @@
 # the workspace. Re-runnable: skips pieces already up.
 #
 # Launch from a normal shell or a Hyprland keybind so the windows persist:
-#   bash showdown/overlay_start.sh
+#   bash crystal_broadcast/overlay_start.sh
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
 PY="$HERE/../.venv/bin/python"

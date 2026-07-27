@@ -12,7 +12,7 @@ Alignment note: box borders are aligned on VISIBLE width (ANSI escapes have
 zero display width), computed by _vis(); _selftest() asserts every boxed line
 is equal width. Never pad on len() of a colored string.
 
-Run via:  showdown/overlay_kitty.sh
+Run via:  crystal_broadcast/overlay_kitty.sh
 """
 from __future__ import annotations
 

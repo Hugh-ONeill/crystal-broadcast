@@ -25,7 +25,7 @@ Input is any protocol capture:
   --replay FILE  a Showdown replay log
 
 Run:
-  python showdown/beat_audit.py --clock /tmp/prism-demo/clock_clean.jsonl \
+  python crystal_broadcast/beat_audit.py --clock /tmp/prism-demo/clock_clean.jsonl \
       --role p1 --turns 26-29
 """
 from __future__ import annotations
@@ -37,7 +37,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from showdown.beat_director import ProtocolScanner, classify  # noqa: E402
+from crystal_broadcast.beat_director import ProtocolScanner, classify  # noqa: E402
 
 
 def lines_from_clock(path: Path, battle: str | None = None) -> list[str]:

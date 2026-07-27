@@ -7,7 +7,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from showdown.beat_director import (Director, ProtocolScanner, TurnContext,
+from crystal_broadcast.beat_director import (Director, ProtocolScanner, TurnContext,
                                     classify, Event, world_collapse_prose,
                                     endgame_solved_prose, deep_think_prose,
                                     archetype_prose)

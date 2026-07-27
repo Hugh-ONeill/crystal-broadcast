@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+.venv/
+grudges.json
+presentation_clock.jsonl
+desk_reads.jsonl

@@ -10,7 +10,7 @@ ROOT = Path(__file__).parent.parent
 
 def test_gold_director_level_green():
     r = subprocess.run(
-        [sys.executable, str(ROOT / "showdown" / "commentary_eval.py")],
+        [sys.executable, str(ROOT / "crystal_broadcast" / "commentary_eval.py")],
         capture_output=True, text=True, timeout=120)
     assert r.returncode == 0, f"gold set regressed:\n{r.stdout}{r.stderr}"
 

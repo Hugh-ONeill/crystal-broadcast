@@ -12,9 +12,9 @@ species, so counting killers-of-our-mons by species IS the ledger.
 The ledger is a plain JSON file, additive across games. Rebuild or top it
 up from replay logs:
 
-  .venv/bin/python showdown/grudge_ledger.py build \
-      showdown/replays/gen9ou/*.json --our CBGen9 -o showdown/grudges.json
-  .venv/bin/python showdown/grudge_ledger.py show showdown/grudges.json
+  python crystal_broadcast/grudge_ledger.py build \
+      <crystal-battle>/showdown/replays/gen9ou/*.json --our CBGen9 -o crystal_broadcast/grudges.json
+  python crystal_broadcast/grudge_ledger.py show crystal_broadcast/grudges.json
 """
 from __future__ import annotations
 
@@ -28,7 +28,15 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # canonical species id for merging nickname/forme spellings into one grudge
-from showdown.name_mapping import _normalize
+
+
+def _normalize(name: str) -> str:
+    """Lowercase, strip non-alphanumeric. Vendored from crystal-battle's
+    showdown/name_mapping.py: it is two lines, and copying it is what keeps
+    this repo from importing the engine at all. The dependency runs one way
+    (crystal-battle -> crystal-broadcast) and this was the only exception."""
+    return re.sub(r"[^a-z0-9]", "", name.lower())
+
 
 _PLAYER_RE = re.compile(r"\|player\|(p[12])\|([^|]*)\|")
 

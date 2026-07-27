@@ -6,8 +6,8 @@ requested types with its replay id, turn, side (from p1's seat), and
 prose — the shopping list for pinning gold entries to real games.
 
 Usage:
-  .venv/bin/python showdown/gold/replay_scout.py --types status_applied \
-      --limit 200 [--dir showdown/replays/gen9ou] [--grep Will-O-Wisp]
+  .venv/bin/python crystal_broadcast/gold/replay_scout.py --types status_applied \
+      --limit 200 [--dir <crystal-battle>/showdown/replays/gen9ou] [--grep Will-O-Wisp]
 """
 from __future__ import annotations
 
@@ -17,8 +17,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from showdown.beat_director import ProtocolScanner
-from showdown.commentary_eval import load_replay_blocks
+from crystal_broadcast.beat_director import ProtocolScanner
+from crystal_broadcast.commentary_eval import load_replay_blocks
 
 
 def main():

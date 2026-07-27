@@ -8,7 +8,7 @@
 # window even when started from inside another kitty session, and reads the
 # caption feed (commentary_overlay.py). Class "prism-panel".
 #
-#   hyprctl dispatch exec -- bash showdown/overlay_kitty.sh
+#   hyprctl dispatch exec -- bash crystal_broadcast/overlay_kitty.sh
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
 PY="$HERE/../.venv/bin/python"   # needs websockets (project venv has it)

@@ -7,9 +7,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from showdown.grudge_ledger import (GrudgeLedger, merge_faints,
+from crystal_broadcast.grudge_ledger import (GrudgeLedger, merge_faints,
                                      parse_replay_games)
-from showdown.caster import Caster
+from crystal_broadcast.caster import Caster
 
 
 def _game(our_role, faints):

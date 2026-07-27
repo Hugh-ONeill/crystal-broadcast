@@ -22,7 +22,7 @@ constant, a fixed pace would be fine and the buffer would be over-engineering.
 Doubles as the feed a PTS scheduler subscribes to: every event is rebroadcast
 to any other connected peer, so a consumer just connects and listens.
 
-Run:  python showdown/presentation_clock.py [--port 8132] [--log FILE]
+Run:  python crystal_broadcast/presentation_clock.py [--port 8132] [--log FILE]
 Then load the broadcast composite; the hook connects on its own and retries
 if this process starts later.
 """

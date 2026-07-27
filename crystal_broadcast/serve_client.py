@@ -29,7 +29,7 @@ not available; and the page is cross-origin from broadcast.html on :8129, so
 it cannot be styled from there. The name still ends in .html, which is what
 makes PSRouter hash-route to the room.
 
-Run:  python showdown/serve_client.py [--port 8127] [--root <client dir>]
+Run:  python crystal_broadcast/serve_client.py [--port 8127] [--root <client dir>]
 Requires `./build full` in pokemon-showdown-client — a plain `./build` leaves
 data/ empty, the client async-falls-back to the CDN for pokedex/graphics, and
 the battle panel throws in BattleScene before they land.

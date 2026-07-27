@@ -1,0 +1,16 @@
+[project]
+name = "crystal-broadcast"
+version = "0.1.0"
+description = "AI commentary broadcast system: a beat director, a two-persona caster, and a presentation-clock scheduler for narrating a live Pokemon battle."
+requires-python = ">=3.12"
+dependencies = ["websockets"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["crystal_broadcast*"]
+
+[tool.setuptools.package-data]
+crystal_broadcast = ["*.html", "*.css", "*.js", "*.sh", "personas/*", "gold/*", "gold/**/*"]

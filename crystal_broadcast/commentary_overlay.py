@@ -30,7 +30,7 @@ Two views on the same feed, with different jobs:
     here; hiding Showdown's chrome needs OBS custom CSS or a client-side
     broadcast mode in the fork.
 
-Run:  python showdown/commentary_overlay.py [--source ws://127.0.0.1:8131]
+Run:  python crystal_broadcast/commentary_overlay.py [--source ws://127.0.0.1:8131]
 """
 from __future__ import annotations
 
@@ -49,7 +49,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import websockets
 
-from showdown.caster_bridge import _load_token, _sanitize, _unwrap
+from crystal_broadcast.caster_bridge import _load_token, _sanitize, _unwrap
 
 CASTER_URL = "ws://127.0.0.1:8131"
 HTTP_PORT = 8129

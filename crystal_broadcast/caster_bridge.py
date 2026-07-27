@@ -1,5 +1,5 @@
 # Caster bridge: forward battle commentary beats from the live player to the
-# caster (showdown/caster.py), which generates PRISM's and FRACTURE's lines.
+# caster (crystal_broadcast/caster.py), which generates PRISM's and FRACTURE's lines.
 #
 # HISTORY, because the wire format looks arbitrary otherwise: this shape was
 # reverse-engineered from AIRI 0.11.0's embedded @proj-airi/server-runtime,
@@ -25,11 +25,11 @@
 # quiet stretches.
 #
 # Manual test (the caster must be running):
-#   .venv/bin/python showdown/caster_bridge.py "Mic check from the bridge."
+#   .venv/bin/python crystal_broadcast/caster_bridge.py "Mic check from the bridge."
 #
 # Live commentary tap (for recording sessions — prints each battle beat and
 # the spoken reply as they happen):
-#   .venv/bin/python showdown/caster_bridge.py --watch
+#   .venv/bin/python crystal_broadcast/caster_bridge.py --watch
 
 from __future__ import annotations
 
@@ -43,7 +43,7 @@ from pathlib import Path
 
 import websockets
 
-# The caster (showdown/caster.py). This used to default to AIRI on :6121 —
+# The caster (crystal_broadcast/caster.py). This used to default to AIRI on :6121 —
 # AIRI is an inspiration for this project, not a dependency, and nothing in
 # the broadcast path has talked to it since the duo shipped.
 DEFAULT_URL = "ws://127.0.0.1:8131/ws"
