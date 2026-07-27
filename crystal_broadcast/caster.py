@@ -661,6 +661,17 @@ class Caster:
                           f"is {theirs}. Those are the only two Pokemon in "
                           f"play — never describe any other mon as active, "
                           f"and never attribute this turn's actions to one.")
+        # A beat with no "Last exchange:" reports an INTENDED move whose
+        # result is not known yet. Measured twice on 2026-07-27: on "We go
+        # for Stone Edge" both voices invented a miss (the next beat said it
+        # landed), and on "We go for Rapid Spin" PRISM said it "successfully
+        # removed the entry hazards" before it had resolved. Naming the
+        # uncertainty is cheaper than a guard per outcome type.
+        if "Last exchange:" not in (item.get("text") or ""):
+            direction += (" This beat states the move we are ABOUT to make; "
+                          "its result is NOT known yet. Do not say whether it "
+                          "hit, missed, knocked out, or worked — react to the "
+                          "decision and the position instead.")
         direction += (" One or two short spoken sentences, react now. "
                       "Output only the line itself.")
         if nudge:

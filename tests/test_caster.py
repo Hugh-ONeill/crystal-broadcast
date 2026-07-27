@@ -760,3 +760,20 @@ def test_beat_history_grounds_a_callback_but_not_our_own_lines():
     assert c._ungrounded_entity("That Spore is still ruining us.", item) is None
     c.transcript.append(("FRACTURE", "That Hydro Pump was brutal."))
     assert c._ungrounded_entity("Hydro Pump again!", item) == "Hydro Pump"
+
+
+def test_pre_move_beats_are_flagged_as_outcome_unknown():
+    """A beat with no "Last exchange:" states an INTENDED move. Measured twice
+    on 2026-07-27: both voices invented a miss on "We go for Stone Edge" (the
+    next beat said it landed), and PRISM said "Rapid Spin successfully removed
+    the entry hazards" before it resolved."""
+    c = Caster("http://unused", "test-model", expert_url=None)
+    pre = {"text": "[BATTLE T20] Iron Valiant (100% hp) vs Kyurem (65% hp). "
+                   "We go for Moonblast.", "beats": [], "hud": None}
+    post = {"text": "[BATTLE T21] Last exchange: Iron Valiant's Moonblast "
+                    "landed super effective. We go for Shadow Ball.",
+            "beats": [], "hud": None}
+    pre_msg = c._prompt("PRISM", pre)[1]["content"]
+    post_msg = c._prompt("PRISM", post)[1]["content"]
+    assert "result is NOT known yet" in pre_msg
+    assert "result is NOT known yet" not in post_msg
