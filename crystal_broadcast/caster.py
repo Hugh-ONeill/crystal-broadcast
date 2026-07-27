@@ -732,6 +732,24 @@ class Caster:
         return "critical" not in (item.get("text") or "").lower()
 
     @staticmethod
+    def _fabricated_miss(line: str, item: dict) -> bool:
+        """True when the line claims a move MISSED and the beat never said so.
+
+        Measured live 2026-07-27: on a pre-move beat carrying no outcome at
+        all ("We go for Stone Edge. Desk read: this is nearly gone"), BOTH
+        voices invented a miss — "THAT MISSED!?" and "The miss on Stone Edge
+        was all we had left" — and the next turn's beat confirmed the move
+        LANDED. Same facts-of-record shape as _fabricated_crit: an outcome
+        asserted that the record does not contain. A pre-move beat is the
+        dangerous case, because the desk read tempts a narration of failure.
+        """
+        if not re.search(r"\b(missed|miss|whiff(?:ed)?)\b", line, re.I):
+            return False
+        beat = (item.get("text") or "").lower()
+        return not re.search(r"\bmiss(?:ed)?\b|\bavoided\b|\bprotected\b",
+                             beat)
+
+    @staticmethod
     def _fabricated_synergy(line: str, item: dict) -> bool:
         """True when the line names a status-synergy ability the beat never
         flagged. The director only writes an ability name into the beat when
@@ -846,6 +864,19 @@ class Caster:
             # (a super-effective/heavy hit narrated as a "crit" that never
             # happened). If the line claims a crit the beat never stated,
             # regenerate once forbidding it.
+            if line and self._fabricated_miss(line, item):
+                try:
+                    raw = await asyncio.to_thread(
+                        self._generate_sync, persona, item,
+                        "Do NOT say the move missed or whiffed — nothing in "
+                        "the beat reports a miss. State only what the beat "
+                        "reports.")
+                    retry = _sanitize(_SELF_LABEL.sub("", raw.strip()))
+                    retry = _fix_species_spelling(retry, item)
+                    if retry and not self._fabricated_miss(retry, item):
+                        line = retry
+                except Exception:
+                    pass
             if line and self._fabricated_crit(line, item):
                 try:
                     raw = await asyncio.to_thread(

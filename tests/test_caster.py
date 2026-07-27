@@ -685,3 +685,19 @@ def test_species_speller_leaves_correct_and_unrelated_words_alone():
     assert fix("Gargancl is here.", {"hud": {}}) == "Gargancl is here."
     assert fix("Tuskk hits hard.", {"hud": {"us": "Great Tusk"}}) == \
         "Tuskk hits hard."
+
+
+def test_fabricated_miss_is_caught():
+    """Live 2026-07-27: on a pre-move beat with no outcome ("We go for Stone
+    Edge"), BOTH voices invented a miss and the next beat confirmed the move
+    landed. Same facts-of-record shape as the crit guard."""
+    pre = {"text": "[BATTLE T33] Zamazenta (100% hp) vs Ting-Lu (9% hp). "
+                   "We go for Stone Edge."}
+    real = {"text": "[BATTLE T30] Last exchange: Gliscor's Toxic missed "
+                    "their Ting-Lu."}
+    assert Caster._fabricated_miss("THAT MISSED!?", pre)
+    assert Caster._fabricated_miss("The miss on Stone Edge was all we had.",
+                                   pre)
+    # a miss the beat DID report is fair game, and so is not mentioning one
+    assert not Caster._fabricated_miss("THE TOXIC JUST WHIFFED?!", real)
+    assert not Caster._fabricated_miss("Stone Edge is our last shot.", pre)

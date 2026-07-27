@@ -290,6 +290,14 @@ def archetype_prose(label: str | None) -> str | None:
     return _ARCHETYPE_FRAME.get(label) if label else None
 
 
+# residual damage sources as the protocol writes them -> what a caster says
+_RESIDUAL_NAME = {
+    "psn": "poison", "tox": "poison", "brn": "burn",
+    "Stealth Rock": "Stealth Rock", "Spikes": "Spikes",
+    "Leech Seed": "Leech Seed", "Life Orb": "Life Orb recoil",
+    "Salt Cure": "Salt Cure", "Curse": "Curse", "Nightmare": "Nightmare",
+    "confusion": "confusion", "recoil": "recoil", "trapped": "the trap",
+}
 _STATUS_INFLICT = {
     "frz": "froze {n} solid", "brn": "burned {n}", "par": "paralyzed {n}",
     "slp": "put {n} to sleep", "psn": "poisoned {n}",
@@ -428,6 +436,9 @@ class ProtocolScanner:
         # (mover species, move, mover side) — side is what lets an effect
         # tell a SELF-inflicted drop from one the opponent caused
         self._last_move: tuple | None = None
+        # slot -> last residual damage source, for naming a
+        # non-move KO's actual cause
+        self._residual: dict = {}
         # position -> species, from switch/drag/replace details: protocol
         # position tokens carry NICKNAMES ("p1a: Speak Softly"), and prose
         # built from them leaks the nickname ("knocked off Speak Softly" —
@@ -650,6 +661,18 @@ class ProtocolScanner:
                 key = sm[2].split(":")[0]
                 frac = _hp_frac(sm[3]) if len(sm) > 3 else None
                 old = self._hp.get(key)
+                # residual chip carries its source ("[from] psn", "[from]
+                # Stealth Rock", "[from] item: Life Orb"). Remember the last
+                # one per slot: a faint that is NOT a move's finishing blow
+                # otherwise reads as "X went down" straight after X's own
+                # attack, and the caster credits that attack with the kill —
+                # measured live 2026-07-27, FRACTURE announced "EARTHQUAKE
+                # TOOK THE BODY" when Ting-Lu had died to its own poison.
+                if t == "-damage":
+                    src = next((a.split("]", 1)[1].strip() for a in sm[4:]
+                                if a.startswith("[from]") and "]" in a), None)
+                    if src:
+                        self._residual[key] = src.split(":")[-1].strip()
                 if frac is not None:
                     self._hp[key] = frac
                 if (t == "-damage" and cur and old is not None
@@ -676,9 +699,13 @@ class ProtocolScanner:
                     cur["ko"] = True  # attribute to the finishing move
                 else:
                     flush()  # residual: poison/hazard/recoil/Life Orb etc.
-                    out.append(Event("ko", f"{qual(sm[2])} went down",
+                    why = self._residual.pop(sm[2].split(":")[0], None)
+                    prose = (f"{qual(sm[2])} went down to the {_RESIDUAL_NAME.get(why, why)}"
+                             if why else f"{qual(sm[2])} went down")
+                    out.append(Event("ko", prose,
                                      side=side_of(sm[2]), notable=True,
-                                     data={"target": mon, "residual": True}))
+                                     data={"target": mon, "residual": True,
+                                           "cause": why}))
             elif t == "-status" and len(sm) > 3:
                 tmpl = _STATUS_INFLICT.get(sm[3])
                 if tmpl:

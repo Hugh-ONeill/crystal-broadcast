@@ -843,3 +843,31 @@ def test_field_effect_with_no_known_cause_keeps_the_old_wording():
     w = [e for e in evs if e.type == "weather_set"][0]
     assert w.prose == "sand set in" or w.prose.endswith("set in")
     assert w.data["user"] is None
+
+
+def test_residual_ko_names_what_actually_killed_it():
+    """Regression (live 2026-07-27): a faint that is NOT a move's finishing
+    blow read as a bare "X went down" directly after X's OWN attack, so
+    FRACTURE announced "EARTHQUAKE TOOK THE BODY" when Ting-Lu had died to
+    its own poison — crediting a mon's attack with killing that mon."""
+    sc = ProtocolScanner()
+    evs = sc.scan([
+        ["", "move", "p2a: Ting-Lu", "Earthquake", "p1a: Zamazenta"],
+        ["", "-damage", "p1a: Zamazenta", "66/100"],
+        ["", "-damage", "p2a: Ting-Lu", "0 fnt", "[from] psn"],
+        ["", "faint", "p2a: Ting-Lu"],
+    ], role="p1")
+    ko = [e for e in evs if e.type == "ko" and e.data.get("residual")][0]
+    assert "went down to the poison" in ko.prose
+    assert ko.data["cause"] == "psn"
+    assert "Earthquake" not in ko.prose
+
+
+def test_residual_ko_stays_bare_when_nothing_names_a_cause():
+    """Never guess: no [from] tag, no invented cause."""
+    sc = ProtocolScanner()
+    evs = sc.scan([["", "-damage", "p2a: Blissey", "0 fnt"],
+                   ["", "faint", "p2a: Blissey"]], role="p1")
+    ko = [e for e in evs if e.type == "ko"][0]
+    assert ko.prose == "Blissey went down"
+    assert ko.data["cause"] is None
