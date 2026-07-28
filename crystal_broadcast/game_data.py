@@ -56,6 +56,45 @@ class GameData:
             return bs.get("atk", 0), bs.get("spa", 0)
         return None
 
+    def move_type(self, display_name: str) -> str | None:
+        """'Icicle Spear' -> 'Ice'. None for an unknown move."""
+        entry = self.gen.moves.get(_norm(display_name))
+        t = (entry or {}).get("type")
+        return t.title() if isinstance(t, str) else None
+
+    def species_types(self, display_name: str) -> list[str]:
+        """'Ceruledge' -> ['Fire', 'Ghost']. Empty for an unknown species.
+        This is the DEX typing — a Terastallized mon is a different question
+        and the caller has to supply the tera type."""
+        entry = self.gen.pokedex.get(_norm(display_name))
+        ts = (entry or {}).get("types") or []
+        return [t.title() for t in ts if isinstance(t, str)]
+
+    def effectiveness(self, atk_type: str, def_types) -> float | None:
+        """Damage multiplier of one attacking type into a defender's typing.
+
+        poke_env's chart is indexed [DEFENDER][ATTACKER], which is easy to get
+        backwards — and the chart is genuinely asymmetric, so a transposed
+        lookup returns a plausible wrong number rather than an error. Verified
+        against the engine's own table: Ice into Fire is 0.5, Ice into Fairy is
+        1.0 (NOT resisted), Dragon into Fairy is 0.0.
+        """
+        if not atk_type or not def_types:
+            return None
+        chart = getattr(self.gen, "type_chart", None)
+        if not chart:
+            return None
+        mult = 1.0
+        for d in def_types:
+            row = chart.get(d.upper())
+            if row is None:
+                return None
+            v = row.get(atk_type.upper())
+            if v is None:
+                return None
+            mult *= float(v)
+        return mult
+
     def entity_names(self) -> list[str]:
         """Species + moves + ABILITIES.
 

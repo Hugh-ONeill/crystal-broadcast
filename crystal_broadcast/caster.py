@@ -340,6 +340,10 @@ class Caster:
         self._beat_history: deque = deque(maxlen=40)
         self._pending_queue: deque = deque()
         self.PENDING_QUEUE_MAX = 120
+        # species -> Tera type, for the type-claim guard. Tera REPLACES typing,
+        # so this is not a decoration: checking a claim against the dex entry
+        # of a Terastallized mon checks a typing that left the field.
+        self._tera: dict = {}
         # how many grounded facts ride along on a beat, and how many of those
         # are held back for the two actives' abilities (see _gather_facts).
         # The cap is a latency budget: each fact is an expert round-trip.
@@ -834,6 +838,96 @@ class Caster:
                 return name
         return None
 
+    # effectiveness vocabulary -> the multiplier the claim implies
+    _RESIST_RE = re.compile(
+        r"\b(resists?|resisted|resisting|not very effective|walls?|walled|"
+        r"shrugs? off|tanks?)\b", re.I)
+    _IMMUNE_RE = re.compile(
+        r"\b(immune|immunity|no effect|does nothing|doesn't do anything)\b",
+        re.I)
+    _SUPER_RE = re.compile(r"\b(super[- ]effective|weak to|weakness to)\b",
+                           re.I)
+    _TERA_RE = re.compile(
+        r"([A-Z][\w'.-]*(?:-[A-Z][\w'.-]*)?) Terastallized into an? (\w+) type")
+
+    def _note_tera(self, beat_text: str) -> None:
+        """Remember what a mon Terastallized into, for the type-claim guard.
+        Tera REPLACES the typing, so a claim checked against the dex entry is
+        checked against a typing that is no longer on the field."""
+        for mon, ttype in self._TERA_RE.findall(beat_text or ""):
+            self._tera[mon.lower()] = ttype.title()
+
+    def _bad_type_claim(self, line: str, item: dict) -> str | None:
+        """True when the line asserts a type matchup the chart contradicts.
+
+        The gap this closes: every other gate checks NOUNS or EVENTS — that a
+        name exists, that a crit happened. A line can name only real entities,
+        report only real events, and still be exactly backwards about WHY.
+        Measured live 2026-07-28: "The Tera-Fairy on Ceruledge was a desperate
+        attempt to resist the Icicle Spear crits" — Tera Fairy took Ice from
+        0.5x to 1.0x, i.e. it DOUBLED the damage; it was blanking Scale Shot,
+        which Fairy is immune to. Every noun in that sentence is real.
+
+        Deliberately high-precision, low-recall: it fires a regeneration, so a
+        false positive costs latency and a worse line. It only rules when the
+        binding is unambiguous — exactly one move and one species named — and
+        stays silent on anything it cannot resolve.
+        """
+        claim_resist = bool(self._RESIST_RE.search(line))
+        claim_immune = bool(self._IMMUNE_RE.search(line))
+        claim_super = bool(self._SUPER_RE.search(line))
+        if not (claim_resist or claim_immune or claim_super):
+            return None
+        # more than one kind of claim in one line: cannot bind them apart
+        if sum((claim_resist, claim_immune, claim_super)) > 1:
+            return None
+        # If the BEAT already asserts this polarity, the line is quoting the
+        # record and the species it happens to name may be there for another
+        # reason entirely. Measured on the corpus: beat "Iron Valiant's
+        # Moonblast landed not very effective on Moltres. We switch to
+        # Kommo-o" -> FRACTURE echoed "NOT VERY EFFECTIVE?" and named Kommo-o
+        # as the SWITCH TARGET, and binding (Moonblast, Kommo-o) flagged a
+        # correct line. Costs recall — a wrong claim about a third mon on a
+        # turn that already reported an effectiveness slips through — which is
+        # the right trade for a gate that forces a regeneration.
+        beat_text = item.get("text") or ""
+        if ((claim_resist and self._RESIST_RE.search(beat_text))
+                or (claim_immune and self._IMMUNE_RE.search(beat_text))
+                or (claim_super and self._SUPER_RE.search(beat_text))):
+            return None
+        try:
+            from crystal_broadcast.game_data import DATA
+            moves = [m["name"] for m in DATA.gen.moves.values() if "name" in m]
+            species = [p["name"] for p in DATA.gen.pokedex.values()
+                       if "name" in p]
+        except Exception:
+            return None
+        named_moves = [m for m in moves if len(m) >= 4 and m in line]
+        named_mons = [s for s in species if len(s) >= 4 and s in line]
+        # drop names contained in a longer match ("Ice Spinner" vs "Ice Beam")
+        named_moves = [m for m in named_moves
+                       if not any(m != o and m in o for o in named_moves)]
+        named_mons = [s for s in named_mons
+                      if not any(s != o and s in o for o in named_mons)]
+        if len(named_moves) != 1 or len(named_mons) != 1:
+            return None
+        move, mon = named_moves[0], named_mons[0]
+        atk = DATA.move_type(move)
+        # a Terastallized mon IS its tera type; fall back to the dex entry
+        tera = self._tera.get(mon.lower())
+        dtypes = [tera] if tera else DATA.species_types(mon)
+        mult = DATA.effectiveness(atk, dtypes)
+        if mult is None:
+            return None
+        typing = tera + " (Tera)" if tera else "/".join(dtypes)
+        if claim_resist and mult >= 1:
+            return f"{mon} does NOT resist {move} ({atk} into {typing} is {mult}x)"
+        if claim_immune and mult > 0:
+            return f"{mon} is NOT immune to {move} ({atk} into {typing} is {mult}x)"
+        if claim_super and mult <= 1:
+            return f"{move} is NOT super effective on {mon} ({atk} into {typing} is {mult}x)"
+        return None
+
     @staticmethod
     def _fabricated_miss(line: str, item: dict) -> bool:
         """True when the line claims a move MISSED and the beat never said so.
@@ -918,6 +1012,10 @@ class Caster:
             self.transcript.clear()
             self._beat_history.clear()
             self._match_stalls.clear()
+            self._tera.clear()
+        # record any Tera BEFORE the line is generated and checked: the beat
+        # that announces it is usually the same beat being reacted to
+        self._note_tera(item.get("text") or "")
         if item["text"].startswith("[RESULT]"):
             self._log_fact_summary()
             self._log_pace_summary()
@@ -997,6 +1095,25 @@ class Caster:
                     retry = _fix_species_spelling(retry, item)
                     if retry and not self._fabricated_miss(retry, item):
                         line = retry
+                except Exception:
+                    pass
+            # type-claim guard: the chart contradicts the stated matchup
+            bad_type = self._bad_type_claim(line, item) if line else None
+            if bad_type:
+                try:
+                    raw = await asyncio.to_thread(
+                        self._generate_sync, persona, item,
+                        f"WRONG: {bad_type}. Do not claim that matchup. State "
+                        "only what the beat reports, and do not explain the "
+                        "moment with a type interaction unless the beat says "
+                        "so.")
+                    retry = _sanitize(_SELF_LABEL.sub("", raw.strip()))
+                    retry = _fix_species_spelling(retry, item)
+                    if retry and not self._bad_type_claim(retry, item):
+                        line = retry
+                    else:
+                        print(f"caster: bad type claim survived a regen "
+                              f"({bad_type})", flush=True)
                 except Exception:
                     pass
             if line and self._fabricated_crit(line, item):

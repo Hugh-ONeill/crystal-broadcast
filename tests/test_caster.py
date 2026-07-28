@@ -806,3 +806,64 @@ def test_fracture_blame_is_routed_to_dice_or_opponent():
         "beats": [_beat("analyst", register="despair")],
         "hud": {"turn": 5}})[1]["content"]
     assert "Blame THEM" not in prism and "genuinely WAS the dice" not in prism
+
+
+def _tc(beat):
+    """Caster with tera state primed from a beat, for the type-claim guard."""
+    c = Caster("http://unused", "test-model", expert_url=None)
+    c._note_tera(beat)
+    return c
+
+
+def test_type_claim_guard_catches_backwards_reasoning():
+    """The gap every other gate leaves: a line can name only real entities and
+    report only real events and still be exactly backwards about WHY.
+
+    Live 2026-07-28: "The Tera-Fairy on Ceruledge was a desperate attempt to
+    resist the Icicle Spear crits". Tera Fairy took Ice from 0.5x to 1.0x — it
+    DOUBLED the damage. It was blanking Scale Shot, which Fairy is immune to.
+    """
+    beat = ("Ceruledge Terastallized into a Fairy type; "
+            "Kyurem's Icicle Spear hit Ceruledge")
+    c = _tc(beat)
+    v = c._bad_type_claim(
+        "The Tera-Fairy on Ceruledge was a desperate attempt to resist the "
+        "Icicle Spear crits.", {"text": beat})
+    assert v and "does NOT resist" in v and "1.0x" in v
+
+
+def test_type_claim_guard_is_tera_aware():
+    """The SAME sentence is correct without the Tera: Ice into Fire/Ghost
+    really is 0.5x. If the guard checked the dex entry it would both miss the
+    real error and flag this correct line."""
+    c = Caster("http://unused", "test-model", expert_url=None)
+    assert c._bad_type_claim("Ceruledge resists the Icicle Spear.",
+                             {"text": "[BATTLE T5] x"}) is None
+
+
+def test_type_claim_guard_flags_false_super_effective():
+    c = Caster("http://unused", "test-model", expert_url=None)
+    v = c._bad_type_claim("Iron Head is super effective on Toxapex.",
+                          {"text": "[BATTLE T5] x"})
+    assert v and "NOT super effective" in v and "0.5x" in v
+
+
+def test_type_claim_guard_ignores_a_line_echoing_the_beat():
+    """Corpus false positive: the beat reported Moonblast as not very effective
+    on MOLTRES and the switch target was Kommo-o. Binding the only move to the
+    only species flagged a line that was quoting the record correctly."""
+    beat = ("Iron Valiant's Moonblast landed not very effective on Moltres. "
+            "We switch to Kommo-o.")
+    c = _tc(beat)
+    assert c._bad_type_claim(
+        "NOT VERY EFFECTIVE? I am switching into Kommo-o!",
+        {"text": beat}) is None
+
+
+def test_type_claim_guard_stays_silent_when_it_cannot_bind():
+    """Two moves named: the claim cannot be attached to one matchup, so the
+    guard must not rule. It fires a regeneration, so silence beats a guess."""
+    c = Caster("http://unused", "test-model", expert_url=None)
+    assert c._bad_type_claim(
+        "Ceruledge resists Icicle Spear but not Scale Shot.",
+        {"text": "[BATTLE T5] x"}) is None
