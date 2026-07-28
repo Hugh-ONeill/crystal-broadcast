@@ -147,6 +147,13 @@ _SYNERGY_ABILITIES = ("poison heal", "guts", "quick feet", "marvel scale",
 # caption mode ("the search is opting for X, the desk read shows Y" every
 # line — measured, an entire match of it). A rotating lens changes the
 # TASK per line, which changes the sentence shapes with it.
+# Registers the director only ever assigns to DICE: a crit, a miss, full
+# paralysis, a freeze. Everything else reached the board because a human chose
+# it. FRACTURE may rage at the server for these and must blame the opponent for
+# the rest — see the BLAME THE RIGHT ENEMY rule in personas/fracture.txt. Kept
+# in sync with beat_director's _LUCK_REGISTERS and the crit/freeze classifiers.
+_DICE_REGISTERS = frozenset({"persecution", "delight", "rejoicing"})
+
 _PRISM_ANGLES = [
     "name the one thing that actually changed this turn",
     "say what this positions us for two or three turns out",
@@ -652,6 +659,20 @@ class Caster:
             # tasks (and therefore sentence shapes) differ
             turn = (item.get("hud") or {}).get("turn") or 0
             direction += f" Angle: {_PRISM_ANGLES[turn % len(_PRISM_ANGLES)]}."
+        # Tell her WHICH enemy this one belongs to. The contract states the
+        # rule; this makes it mechanical, because deciding "was that RNG or a
+        # read?" from prose is exactly the judgement she gets wrong — measured
+        # live 2026-07-28, an opponent simply clicking Close Combat became
+        # "the server literally decided Kyurem had to die for the plot".
+        if persona == "FRACTURE" and (reg_beat or pool):
+            kind = ((reg_beat or pool[0]) or {}).get("beat")
+            if kind == "crit_luck" or register in _DICE_REGISTERS:
+                direction += (" This one genuinely WAS the dice: rage at the "
+                              "server/RNG if you want.")
+            else:
+                direction += (" This was a CHOSEN play, not a dice roll: the "
+                              "opponent clicked it. Blame THEM, not the "
+                              "server.")
         # FRACTURE fixates on one stall image; show her the ones already used
         # this match so she reaches for a new one (the reactive guard in
         # speak() is the backstop when this isn't enough)

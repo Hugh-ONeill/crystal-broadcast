@@ -777,3 +777,32 @@ def test_pre_move_beats_are_flagged_as_outcome_unknown():
     post_msg = c._prompt("PRISM", post)[1]["content"]
     assert "result is NOT known yet" in pre_msg
     assert "result is NOT known yet" not in post_msg
+
+
+def test_fracture_blame_is_routed_to_dice_or_opponent():
+    """She blamed 'the server' for plays a human chose — live 2026-07-28, an
+    opponent clicking Close Combat became 'the server literally decided Kyurem
+    had to die for the plot'. The contract states the rule; the direction makes
+    it mechanical, because classifying RNG-vs-read from prose is the judgement
+    she gets wrong."""
+    c = Caster("http://unused", "test-model", expert_url=None)
+    dice = c._prompt("FRACTURE", {
+        "text": "[BATTLE T5] x",
+        "beats": [_beat("gremlin", register="persecution")],
+        "hud": {"turn": 5}})[1]["content"]
+    assert "genuinely WAS the dice" in dice
+    assert "Blame THEM" not in dice
+
+    chosen = c._prompt("FRACTURE", {
+        "text": "[BATTLE T5] x",
+        "beats": [_beat("gremlin", register="despair")],
+        "hud": {"turn": 5}})[1]["content"]
+    assert "CHOSEN play" in chosen and "Blame THEM" in chosen
+    assert "genuinely WAS the dice" not in chosen
+
+    # PRISM is unaffected: this is a gremlin-contract rule
+    prism = c._prompt("PRISM", {
+        "text": "[BATTLE T5] x",
+        "beats": [_beat("analyst", register="despair")],
+        "hud": {"turn": 5}})[1]["content"]
+    assert "Blame THEM" not in prism and "genuinely WAS the dice" not in prism
