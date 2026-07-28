@@ -1000,3 +1000,51 @@ def test_one_arg_stats_fn_still_supported():
     ev = Event("unboost", "cut", side="us", notable=True,
                data={"mon": "Kingambit", "stat": "spa", "amount": 1})
     assert d._cosmetic_stat_change(ev) is True
+
+
+def test_item_consumption_says_what_it_did():
+    """Consuming an item is usually the item WORKING, but "used up its Booster
+    Energy" is loss-coded before the caster reads it. Measured live
+    2026-07-28: 4 occurrences in 147 beats, every one framed as a loss, the
+    clearest being "The Booster Energy is gone, so we lost our speed
+    advantage" — backwards, since spending it is what switches Quark Drive on.
+    """
+    sc = ProtocolScanner()
+    evs = sc.scan([
+        ["", "switch", "p1a: Iron Valiant", "Iron Valiant", "100/100"],
+        ["", "-enditem", "p1a: Iron Valiant", "Booster Energy"],
+    ], role="p1")
+    used = next(e for e in evs if e.type == "item_used")
+    assert "kicked in" in used.prose
+    assert "used up" not in used.prose
+
+    # an unlisted consumable still must not be loss-coded
+    sc2 = ProtocolScanner()
+    evs2 = sc2.scan([
+        ["", "switch", "p1a: Iron Valiant", "Iron Valiant", "100/100"],
+        ["", "-enditem", "p1a: Iron Valiant", "Some New Gadget"],
+    ], role="p1")
+    assert "activated" in next(e for e in evs2
+                               if e.type == "item_used").prose
+
+
+def test_genuinely_bad_item_losses_keep_their_framing():
+    """The default is activation because the BAD cases are narrow and already
+    have their own prose — this pins that the change did not sweep them up."""
+    sc = ProtocolScanner()
+    evs = sc.scan([
+        ["", "switch", "p1a: Great Tusk", "Great Tusk", "100/100"],
+        ["", "-enditem", "p1a: Great Tusk", "Air Balloon"],
+    ], role="p1")
+    assert "popped" in next(e for e in evs
+                            if e.type == "balloon_popped").prose
+
+    sc2 = ProtocolScanner()
+    evs2 = sc2.scan([
+        ["", "switch", "p2a: Gliscor", "Gliscor", "100/100"],
+        ["", "move", "p2a: Gliscor", "Knock Off", "p1a: Kingambit"],
+        ["", "-enditem", "p1a: Kingambit", "Leftovers",
+         "[from] move: Knock Off"],
+    ], role="p1")
+    off = next(e for e in evs2 if e.type == "item_knocked_off")
+    assert "Knock Off" in off.prose and "Leftovers" in off.prose

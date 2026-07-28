@@ -321,6 +321,31 @@ _STATUS_INFLICT_PASSIVE = {
 # of a Gliscor's own Toxic Orb hands us agency we never had — the same class of
 # error as claiming we set hazards the opponent set.
 _SELF_INFLICTED_STATUS = {"toxic orb", "flame orb", "rest"}
+# Consuming an item is usually the item DOING ITS JOB, and "used up its X" is
+# loss-coded before the caster ever reads it. Measured live 2026-07-28, that
+# wording produced "The Booster Energy is gone, so we lost our speed advantage"
+# — exactly backwards, because spending it is what switches Quark Drive ON. It
+# was not a one-off: 4 occurrences in 147 beats, every one framed as a loss.
+# So say what the consumption DID. The genuinely bad consumptions are narrow
+# and already handled above with their own prose (Knock Off and theft name the
+# perpetrator, Air Balloon "popped" — losing the Ground immunity really is a
+# setback), which is why the default here is activation, not loss.
+_ITEM_ACTIVATION = {
+    "Booster Energy": "{m}'s Booster Energy kicked in",
+    "White Herb": "{m}'s White Herb undid the stat drops",
+    "Power Herb": "{m}'s Power Herb skipped the charge turn",
+    "Mental Herb": "{m}'s Mental Herb shook off the restriction",
+    "Weakness Policy": "{m}'s Weakness Policy fired",
+    "Throat Spray": "{m}'s Throat Spray fired",
+    "Blunder Policy": "{m}'s Blunder Policy fired",
+    "Absorb Bulb": "{m}'s Absorb Bulb fired",
+    "Cell Battery": "{m}'s Cell Battery fired",
+    "Snowball": "{m}'s Snowball fired",
+    "Luminous Moss": "{m}'s Luminous Moss fired",
+    "Eject Button": "{m}'s Eject Button pulled it out",
+    "Eject Pack": "{m}'s Eject Pack forced it out",
+    "Red Card": "{m}'s Red Card dragged the attacker out",
+}
 _STATUS_CURE = {
     "frz": "{n} thawed out", "slp": "{n} woke up",
     "par": "{n} shook off the paralysis", "brn": "{n}'s burn healed",
@@ -860,7 +885,9 @@ class ProtocolScanner:
                                      side=mside,
                                      data={"mon": mon, "item": item}))
                 else:
-                    out.append(Event("item_used", f"{mon_q} used up its {item}",
+                    prose = _ITEM_ACTIVATION.get(item, "{m}'s {i} activated")
+                    out.append(Event("item_used",
+                                     prose.format(m=mon_q, i=item),
                                      side=mside,
                                      data={"mon": mon, "item": item}))
             elif t == "-item" and len(sm) > 3:
