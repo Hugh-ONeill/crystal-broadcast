@@ -867,3 +867,33 @@ def test_type_claim_guard_stays_silent_when_it_cannot_bind():
     assert c._bad_type_claim(
         "Ceruledge resists Icicle Spear but not Scale Shot.",
         {"text": "[BATTLE T5] x"}) is None
+
+
+def test_type_claim_guard_regens_in_speak():
+    """End-to-end wiring, which the live efficacy run could not reach: the
+    error has a ~0.3% base rate and did not reproduce in 16 driven generations,
+    so whether the guard actually FIRES inside speak() has to be pinned
+    deterministically rather than waited for."""
+    beat = ("[BATTLE T3] Ceruledge Terastallized into a Fairy type; "
+            "Kyurem's Icicle Spear hit Ceruledge — a critical hit.")
+    c = Caster("http://unused", "test-model", expert_url=None)
+    calls = []
+
+    def fake_gen(persona, item, nudge=None, temp_boost=0.0):
+        calls.append(nudge)
+        if nudge is None:
+            # the real line from the transcript: Tera Fairy took Ice from
+            # 0.5x to 1.0x, so it did not "resist" anything
+            return ("The Tera-Fairy on Ceruledge was a desperate attempt to "
+                    "resist the Icicle Spear crits.")
+        return "The crit finished Ceruledge before the Tera could matter."
+
+    c._generate_sync = fake_gen
+    c._ungrounded_entity = lambda line, item: None      # isolate this guard
+    asyncio.run(c.speak({"text": beat, "beats": [], "hud": None}))
+
+    assert len(calls) == 2, "guard did not trigger exactly one regeneration"
+    assert calls[1] is not None and "does NOT resist" in calls[1], \
+        "the regen nudge must carry the specific correction"
+    assert c.transcript[-1][1].startswith("The crit finished"), \
+        "the corrected line must be what reaches the transcript"
