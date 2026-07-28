@@ -684,26 +684,31 @@ class Caster:
         if persona == "FRACTURE" and (reg_beat or pool):
             kind = ((reg_beat or pool[0]) or {}).get("beat")
             beat_txt = item.get("text") or ""
-            matchup = bool(self._SUPER_RE.search(beat_txt)
-                           or self._RESIST_RE.search(beat_txt)
-                           or self._IMMUNE_RE.search(beat_txt))
+            # Only a move that FAILED to do its job is the matchup story. A
+            # super-effective hit is somebody's attack working, which is a
+            # choice — routing that here told her "the enemy is our own
+            # position" about THEIR Earthquake killing our Iron Crown.
+            walled = bool(self._RESIST_RE.search(beat_txt)
+                          or self._IMMUNE_RE.search(beat_txt))
             if kind == "crit_luck" or register in _DICE_REGISTERS:
                 direction += (" This one genuinely WAS the dice: rage at the "
                               "server/RNG if you want.")
-            elif matchup:
-                # a resisted/immune/super-effective hit rolled nothing, and it
-                # is often OUR move being walled, so neither "the server" nor
-                # "they clicked it" fits
-                direction += (" This is a TYPE MATCHUP, not a dice roll and "
-                              "not something the server did — never blame the "
-                              "server here. If they brought that wall in, it "
-                              "is their read; if it was already there and we "
-                              "clicked into it anyway, the enemy is our own "
-                              "position and having nothing better to throw.")
+            elif walled:
+                # whose move got walled decides the emotion, and getting it
+                # backwards produced despair over THEIR Hurricane being
+                # resisted by our own Iron Treads
+                direction += (" A move got WALLED here — that is the type "
+                              "chart, never the server, so do not blame it. "
+                              "Check the beat for WHOSE move failed: if it "
+                              "was OURS, the enemy is our own position and "
+                              "having nothing better to throw, and that is "
+                              "your bitterest register. If it was THEIRS, our "
+                              "mon just ate it and you should be gloating.")
             else:
-                direction += (" This was a CHOSEN play, not a dice roll: the "
-                              "opponent clicked it. Blame THEM, not the "
-                              "server.")
+                direction += (" This was a CHOSEN play, not a dice roll. If "
+                              "it was theirs, blame THEM by name — never the "
+                              "server. If it was ours and it worked, take the "
+                              "credit.")
         # FRACTURE fixates on one stall image; show her the ones already used
         # this match so she reaches for a new one (the reactive guard in
         # speak() is the backstop when this isn't enough)

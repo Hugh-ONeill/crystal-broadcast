@@ -797,7 +797,7 @@ def test_fracture_blame_is_routed_to_dice_or_opponent():
         "text": "[BATTLE T5] x",
         "beats": [_beat("gremlin", register="despair")],
         "hud": {"turn": 5}})[1]["content"]
-    assert "CHOSEN play" in chosen and "Blame THEM" in chosen
+    assert "CHOSEN play" in chosen and "blame THEM" in chosen
     assert "genuinely WAS the dice" not in chosen
 
     # a type matchup is a THIRD case: it rolled nothing, and it is often OUR
@@ -808,9 +808,12 @@ def test_fracture_blame_is_routed_to_dice_or_opponent():
                 "effective.",
         "beats": [_beat("gremlin", register="despair")],
         "hud": {"turn": 5}})[1]["content"]
-    assert "TYPE MATCHUP" in matchup
-    assert "Blame THEM" not in matchup
+    assert "WALLED" in matchup
+    assert "CHOSEN play" not in matchup
     assert "genuinely WAS the dice" not in matchup
+    # whose move failed decides the emotion: getting it backwards produced
+    # despair over THEIR Hurricane being resisted by our own Iron Treads
+    assert "OURS" in matchup and "THEIRS" in matchup
 
     # PRISM is unaffected: this is a gremlin-contract rule
     prism = c._prompt("PRISM", {
