@@ -800,6 +800,18 @@ def test_fracture_blame_is_routed_to_dice_or_opponent():
     assert "CHOSEN play" in chosen and "Blame THEM" in chosen
     assert "genuinely WAS the dice" not in chosen
 
+    # a type matchup is a THIRD case: it rolled nothing, and it is often OUR
+    # move being walled, so neither "the server did it" nor "they clicked it"
+    # is the right frame (user call 2026-07-28)
+    matchup = c._prompt("FRACTURE", {
+        "text": "[BATTLE T5] Kyurem's Icicle Spear hit Dondozo — not very "
+                "effective.",
+        "beats": [_beat("gremlin", register="despair")],
+        "hud": {"turn": 5}})[1]["content"]
+    assert "TYPE MATCHUP" in matchup
+    assert "Blame THEM" not in matchup
+    assert "genuinely WAS the dice" not in matchup
+
     # PRISM is unaffected: this is a gremlin-contract rule
     prism = c._prompt("PRISM", {
         "text": "[BATTLE T5] x",
