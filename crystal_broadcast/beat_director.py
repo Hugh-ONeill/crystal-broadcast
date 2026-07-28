@@ -700,8 +700,15 @@ class ProtocolScanner:
                 if (t == "-heal" and frac is not None and old is not None
                         and frac > old):
                     gain = frac - old
-                    # passive trickles (Leftovers, Poison Heal ~6%) are noise;
-                    # a real recovery move puts back a third or more
+                    # 10% keeps the per-turn trickles out (Leftovers and Black
+                    # Sludge are 1/16 = 6.25%) while letting through both real
+                    # recovery moves (~50%) and Poison Heal / Leech Seed drain
+                    # (1/8 = 12.5%). Poison Heal passing is DELIBERATE: it only
+                    # fires when the mon actually took damage, and it is the
+                    # reason our chip is not sticking — precisely the thing
+                    # that was invisible before. If long stall games get noisy,
+                    # filter by CAUSE rather than raising this, or real
+                    # recovery gets cut with the noise.
                     if gain >= 0.10:
                         # flush FIRST: it emits the pending hit and only then
                         # promotes the healer's own move into _last_move, which
