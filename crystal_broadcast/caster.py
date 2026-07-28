@@ -280,6 +280,7 @@ class Caster:
                  expert_url: str | None = DEFAULT_EXPERT,
                  speech_budget: float | None = None,
                  duration_fn=None,
+                 speech=None,
                  pts=None):
         self.upstream = upstream
         self.model = model
@@ -298,6 +299,10 @@ class Caster:
         # speaker always gets to finish, since silence is worse than overrun.
         self.speech_budget = speech_budget
         self.duration_fn = duration_fn
+        # optional voice (crystal_broadcast.speech.Speech). Absent by
+        # default and fail-soft when present: audio is opt-in, and a
+        # missing synth must never cost a line.
+        self.speech = speech
         self.prompts = {p: (PERSONA_DIR / f).read_text()
                         for p, f in _PERSONA_FILE.items()}
         self.grudges = GrudgeLedger.load(grudge_path)
@@ -1381,6 +1386,21 @@ class Caster:
                     self._pace_stats["pts_held_s"].append(held)
             await self.publish(item["text"], persona, line, item["hud"],
                                citations)
+            # Speak it, if a voice is attached. AFTER the PTS gate on purpose:
+            # the whole point of the clock is that a line lands when the viewer
+            # reaches the moment, and audio that ran early would undo it.
+            # Rendering happens in a thread (RTF ~0.5, so about half the line's
+            # length) and playback is fire-and-forget, so awaiting this costs
+            # the render only. The real duration comes back and replaces the
+            # reading-rate estimate for the pacing accounting below.
+            if self.speech is not None:
+                reg_beat = next((b for b in (item.get("beats") or [])
+                                 if b.get("register")), None)
+                spoken = await asyncio.to_thread(
+                    self.speech.speak, persona, line,
+                    reg_beat.get("register") if reg_beat else None)
+                if spoken:
+                    secs = spoken
             if secs is not None:
                 spent += secs
                 self._pace_stats["speech_s"].append(secs)
@@ -1423,6 +1443,20 @@ async def main():
                     help="per-beat wall-clock speech allowance (the beat "
                          "floor). Gates the second voice of a handoff pair. "
                          "Inert until a speech layer supplies durations")
+    ap.add_argument("--speech", action="store_true",
+                    help="speak the lines through the duo TTS service "
+                         "(caster-avatars/tts_server.py). OFF by default: "
+                         "audio is opt-in and text stays the default output. "
+                         "If the service is unreachable the broadcast runs "
+                         "silently rather than losing lines")
+    ap.add_argument("--speech-url", default=None,
+                    help="duo TTS endpoint (default http://127.0.0.1:8133)")
+    ap.add_argument("--speech-out", default=None, metavar="DIR",
+                    help="also keep the rendered wavs here, for a recorded "
+                         "take or a viseme pass")
+    ap.add_argument("--no-play", action="store_true",
+                    help="render speech but do not play it (useful when the "
+                         "recorder is capturing a different audio sink)")
     ap.add_argument("--pts-url", default=None,
                     help="presentation-clock feed (e.g. ws://127.0.0.1:8132) "
                          "— hold each finished line until the VIEWER reaches "
@@ -1437,9 +1471,23 @@ async def main():
 
     pts = (PresentationClock(args.pts_url, max_hold=args.pts_max_hold)
            if args.pts_url else None)
+    speech = None
+    if args.speech:
+        from crystal_broadcast.speech import DEFAULT_URL, Speech
+        speech = Speech(url=args.speech_url or DEFAULT_URL,
+                        play=not args.no_play, out_dir=args.speech_out)
+        # say so at startup rather than discovering it line by line: a silent
+        # broadcast that was MEANT to have audio is the confusing failure
+        if speech.available():
+            print(f"caster: speech ON via {speech.url}", flush=True)
+        else:
+            print(f"caster: --speech given but no service at {speech.url} — "
+                  f"lines will publish as text only", flush=True)
     caster = Caster(args.upstream, args.model, grudge_path=args.grudges,
                     expert_url=None if args.expert == "off" else args.expert,
-                    speech_budget=args.speech_budget, pts=pts)
+                    speech_budget=args.speech_budget,
+                    duration_fn=speech.duration_fn if speech else None,
+                    speech=speech, pts=pts)
     if pts is not None:
         pts.start()
         print(f"caster: PTS scheduling on — holding lines until the viewer "
