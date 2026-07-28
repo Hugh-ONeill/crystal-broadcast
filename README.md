@@ -11,9 +11,9 @@ one way, engine to broadcast.
 
 ## Demo
 
-[![Crystal Broadcast: the closing turns of a live game](docs/demo-poster.jpg)](docs/demo-finish.mp4)
+![Crystal Broadcast: the closing turns of a live game](docs/demo.gif)
 
-The closing 36 seconds of a real game against
+The closing turns of a real game against
 [foul-play](https://github.com/pmariglia/foul-play) (winner of the PokeAgent
 NeurIPS 2025 gen9 OU track) — a trimmed excerpt of one continuous take, with no
 edits inside it. Everything on screen is generated as the game happens: the desk
@@ -21,6 +21,11 @@ read on the left, both personas' lines, and when each one appears.
 
 Nothing is scripted. The caster reads the same protocol stream the engine does,
 and a moment is only voiced if the director judged it worth saying.
+
+Higher quality: the [36-second clip](docs/demo-finish.mp4) at full resolution,
+and the complete 43-turn game attached to the
+[v0.1.0 release](https://github.com/Hugh-ONeill/crystal-broadcast/releases/tag/v0.1.0).
+No audio yet — TTS for the two voices is planned.
 
 ## The inversion
 
