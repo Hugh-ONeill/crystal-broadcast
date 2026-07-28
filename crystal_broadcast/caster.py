@@ -980,6 +980,14 @@ class Caster:
                        if not any(m != o and m in o for o in named_moves)]
         named_mons = [s for s in named_mons
                       if not any(s != o and s in o for o in named_mons)]
+        # A claim about "the Tera-Fairy" often never names the mon — dropping
+        # "on Ceruledge" was enough to escape the check entirely. When the beat
+        # Terastallized exactly one mon and the line is talking about a Tera,
+        # the subject is unambiguous, so bind to it.
+        if not named_mons and re.search(r"\bTera\b|\bTera-", line, re.I):
+            tera_here = self._TERA_RE.findall(item.get("text") or "")
+            if len(tera_here) == 1:
+                named_mons = [tera_here[0][0]]
         if len(named_moves) != 1 or len(named_mons) != 1:
             return None
         move, mon = named_moves[0], named_mons[0]

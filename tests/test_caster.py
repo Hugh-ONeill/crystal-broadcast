@@ -952,3 +952,21 @@ def test_beat_contradiction_regens_in_speak():
     assert len(calls) == 2
     assert calls[1] and "SUPER EFFECTIVE" in calls[1]
     assert c.transcript[-1][1].startswith("Shadow Claw got through")
+
+
+def test_type_claim_guard_binds_an_unnamed_tera_subject():
+    """Found by the provocation battery: dropping "on Ceruledge" from the real
+    line was enough to escape the check, because binding needed a named
+    species. When the beat Terastallized exactly ONE mon and the line is about
+    a Tera, the subject is unambiguous."""
+    beat = ("[BATTLE T3] Ceruledge Terastallized into a Fairy type; "
+            "Kyurem's Icicle Spear hit Ceruledge — a critical hit.")
+    c = _tc(beat)
+    v = c._bad_type_claim(
+        "The Tera-Fairy was a desperate attempt to resist the Icicle Spear.",
+        {"text": beat})
+    assert v and "does NOT resist" in v
+    # a correct read of the same Tera stays silent
+    assert c._bad_type_claim(
+        "The Tera-Fairy was meant to neutralize the Scale Shot.",
+        {"text": beat}) is None
