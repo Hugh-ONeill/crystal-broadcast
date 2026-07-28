@@ -9,6 +9,19 @@ Built to narrate [crystal-battle](https://github.com/Hugh-ONeill/crystal-battle)
 a competitive MCTS agent, but it depends on nothing from it: the dependency runs
 one way, engine to broadcast.
 
+## Demo
+
+[![Crystal Broadcast: the closing turns of a live game](docs/demo-poster.jpg)](docs/demo-finish.mp4)
+
+The closing 36 seconds of a real game against
+[foul-play](https://github.com/pmariglia/foul-play) (winner of the PokeAgent
+NeurIPS 2025 gen9 OU track) — a trimmed excerpt of one continuous take, with no
+edits inside it. Everything on screen is generated as the game happens: the desk
+read on the left, both personas' lines, and when each one appears.
+
+Nothing is scripted. The caster reads the same protocol stream the engine does,
+and a moment is only voiced if the director judged it worth saying.
+
 ## The inversion
 
 Most AI-VTuber projects put the LLM in the driver's seat and let it play the
