@@ -333,6 +333,11 @@ class Caster:
         self._beat_history: deque = deque(maxlen=40)
         self._pending_queue: deque = deque()
         self.PENDING_QUEUE_MAX = 120
+        # how many grounded facts ride along on a beat, and how many of those
+        # are held back for the two actives' abilities (see _gather_facts).
+        # The cap is a latency budget: each fact is an expert round-trip.
+        self.FACT_CAP = 3
+        self.FACT_ABILITY_SLOTS = 1
         self._wake = asyncio.Event()
 
     # --- grounded facts (PRISM only) -----------------------------------
@@ -525,8 +530,16 @@ class Caster:
         # longest first within each group so 'quick feet' wins over a substring
         beat_hits.sort(key=len, reverse=True)
         ability_hits.sort(key=len, reverse=True)
+        # Reserve a slot for the actives' abilities rather than taking a flat
+        # (beat + ability)[:CAP]: beat mechanics sort first, so a turn naming
+        # three of them dropped BOTH active abilities — exactly the busy turn
+        # where knowing the mon has Unburden or Poison Heal explains the moment.
+        # Abilities still fill spare room when the beat names little.
+        n_ability = min(len(ability_hits), self.FACT_ABILITY_SLOTS)
+        picked = beat_hits[:self.FACT_CAP - n_ability]
+        picked += ability_hits[:self.FACT_CAP - len(picked)]
         facts = []
-        for name in (beat_hits + ability_hits)[:3]:
+        for name in picked:
             got = self._retrieve_fact(name)
             if got:
                 facts.append((name, got[0], got[1]))
