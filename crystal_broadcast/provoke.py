@@ -130,19 +130,57 @@ SCENARIOS = [
 ]
 
 
-def _item(sc):
-    return {"text": sc["beat"], "beats": [], "hud": sc.get("hud")}
+# The SAME scenarios as the director wrote them BEFORE 2026-07-28's fixes.
+# Running these answers the question the all-zero battery raised: is the model
+# resisting temptation, or is it simply no longer being tempted? If the errors
+# reappear on the old prose alone, the director fix is what did the work and
+# the caster guards are a backstop rather than the cure.
+PRE_FIX_BEATS = {
+    "tera_type_claim":
+        "[BATTLE T3] Last exchange: Ceruledge Terastallized into a Fairy "
+        "type; Kyurem's Icicle Spear landed a critical hit and a devastating "
+        "blow on Ceruledge; Ceruledge went down. Kyurem (14% hp) vs Cresselia "
+        "(100% hp). We go for Scale Shot. Bodies: us 6 standing, them 5.",
+    "se_called_a_dud":
+        "[BATTLE T4] Last exchange: Kingambit Terastallized into a Ghost "
+        "type; Kommo-o's Shadow Claw landed super effective and a heavy hit "
+        "on Kingambit. Kommo-o (29% hp) vs Kingambit (65% hp). We go for "
+        "Shadow Claw. Bodies: us 6 standing, them 6.",
+    "self_inflicted_status":
+        "[BATTLE T11] Last exchange: Kingambit's Iron Head landed a heavy hit "
+        "on Gliscor; Toxic Orb badly poisoned Gliscor — but if that's the "
+        "Poison Heal set, we just helped it. Kingambit (100% hp) vs Gliscor "
+        "(78% hp). We go for Iron Head. Bodies: us 5 standing, them 5.",
+    # the heal emitted NO event at all, so the damage simply evaporated
+    "healed_to_full":
+        "[BATTLE T36] Last exchange: Kingambit's Iron Head landed not very "
+        "effective and a devastating blow on Toxapex. Kingambit (100% hp) vs "
+        "Toxapex (99% hp). We go for Iron Head. Bodies: us 5 standing, "
+        "them 4.",
+    "our_spin_is_good":
+        "[BATTLE T8] Last exchange: Iron Treads's Rapid Spin landed barely a "
+        "scratch on Gliscor; Iron Treads raised its Speed; our Stealth Rock "
+        "was cleared away by Rapid Spin. Iron Treads (97% hp) vs Gliscor "
+        "(93% hp). We switch to Kyurem. Bodies: us 5 standing, them 6.",
+    # blame routing was a CONTRACT change, not a beat change — there is no
+    # pre-fix beat for it, so it is skipped rather than faked
+}
 
 
-def run(scenarios, k, mode, upstream, model):
+def _item(sc, pre_fix=False):
+    beat = PRE_FIX_BEATS[sc["id"]] if pre_fix else sc["beat"]
+    return {"text": beat, "beats": [], "hud": sc.get("hud")}
+
+
+def run(scenarios, k, mode, upstream, model, pre_fix=False):
     rows = []
     for sc in scenarios:
-        item = _item(sc)
+        item = _item(sc, pre_fix)
         bad_raw = bad_guarded = 0
         examples = []
         for _ in range(k):
             c = Caster(upstream, model, expert_url=None)
-            c._note_tera(sc["beat"])
+            c._note_tera(item["text"])
             if mode in ("raw", "both"):
                 try:
                     line = _sanitize(_SELF_LABEL.sub(
@@ -156,9 +194,9 @@ def run(scenarios, k, mode, upstream, model):
                     print(f"    generation failed: {e!r}")
             if mode in ("guarded", "both"):
                 c2 = Caster(upstream, model, expert_url=None)
-                c2._note_tera(sc["beat"])
+                c2._note_tera(item["text"])
                 try:
-                    asyncio.run(c2.speak(dict(item, text=sc["beat"])))
+                    asyncio.run(c2.speak(dict(item)))
                     spoken = [ln for who, ln in c2.transcript
                               if who == sc["persona"]]
                     if spoken:
@@ -182,12 +220,20 @@ def main():
                     default="both")
     ap.add_argument("--upstream", default=DEFAULT_UPSTREAM)
     ap.add_argument("--model", default=DEFAULT_MODEL)
+    ap.add_argument("--pre-fix", action="store_true",
+                    help="use the PRE-2026-07-28 beat prose, to test whether\n"
+                         "the director fix removed the provocation")
     a = ap.parse_args()
     scen = [s for s in SCENARIOS
             if not a.scenario or s["id"] in a.scenario]
+    if a.pre_fix:
+        skipped = [s["id"] for s in scen if s["id"] not in PRE_FIX_BEATS]
+        scen = [s for s in scen if s["id"] in PRE_FIX_BEATS]
+        for sid in skipped:
+            print(f"  skipping {sid}: contract change, no pre-fix beat exists")
     print(f"provocation battery: {len(scen)} scenarios x {a.k} samples "
-          f"({a.mode})\n")
-    rows = run(scen, a.k, a.mode, a.upstream, a.model)
+          f"({a.mode}{', PRE-FIX beats' if a.pre_fix else ''})\n")
+    rows = run(scen, a.k, a.mode, a.upstream, a.model, a.pre_fix)
     print(f"{'scenario':24} {'persona':9} {'raw':>7} {'guarded':>9}")
     for sid, persona, raw, guarded, examples in rows:
         r = f"{raw}/{a.k}" if a.mode in ("raw", "both") else "-"
