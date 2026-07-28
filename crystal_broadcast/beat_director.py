@@ -1351,11 +1351,69 @@ class Director:
         # escalating-affliction callback must not grieve over a chosen recovery
         self._rest_sleepers: set = set()
 
+    # A mon is treated as committed to one attacking stat only when the other
+    # is this many times smaller. Picked from the actual dex, not by feel: the
+    # genuinely mixed attackers this meta plays top out at Toxapex 1.19, with
+    # Kyurem 1.00, Iron Valiant 1.08 and Kommo-o 1.10 clustered below that;
+    # the next mon up is Dragonite at 1.34, which does run special sets, and
+    # then a gap to Zamazenta 1.50. Sitting the line at 1.5 keeps every mixed
+    # attacker safe and still covers the cases that actually misfire
+    # (Kingambit 2.25, Great Tusk 2.47, Gliscor 2.11).
+    STAT_COMMITMENT_RATIO = 1.5
+
+    def _stats_for(self, mon: str, side: str | None):
+        """(Atk, SpA) for a mon, preferring REAL stats over dex base stats.
+
+        Base stats answer "what could this species do"; the question here is
+        "what is this particular mon built to do", and EVs plus nature move
+        that line a long way — a 252+ Atk Iron Valiant does not care about a
+        Special Attack drop even though its BASE spread (130/120) reads mixed.
+        For our own side Showdown hands us the computed stats in the request,
+        so this is a lookup, not an inference. An opponent's EVs are never
+        revealed, so their side necessarily falls back to base stats.
+
+        The side-aware form is optional: callers that predate it (the gold-set
+        eval, the tests) pass a one-argument function and still work.
+        """
+        if self.stats_fn is None or not mon:
+            return None
+        try:
+            return self.stats_fn(mon, side)
+        except TypeError:
+            return self.stats_fn(mon)
+
+    def _cosmetic_stat_change(self, ev: Event) -> bool:
+        """True when a stat change lands on an attacking stat the mon does not
+        use. Such a change is real but inconsequential, and letting it mark the
+        turn NOTABLE forces the desk to speak — which is how a Special Attack
+        drop on Kingambit (135 Atk / 60 SpA) became "THAT MOONBLAST WAS A
+        DISASTER! My Kingambit is sitting here with his Special Attack gutted".
+        The inflation follows from being made to say something, so the fix is
+        to stop compelling the turn rather than to add prose telling the
+        casters to care less."""
+        if ev.type not in ("boost", "unboost") or self.stats_fn is None:
+            return False
+        stat = ev.data.get("stat")
+        if stat not in ("atk", "spa"):
+            return False
+        mon = ev.data.get("mon")
+        stats = self._stats_for(mon, ev.side) if mon else None
+        if not stats:
+            return False
+        atk, spa = stats
+        if not atk or not spa:
+            return False
+        if stat == "spa":
+            return atk / spa >= self.STAT_COMMITMENT_RATIO
+        return spa / atk >= self.STAT_COMMITMENT_RATIO
+
     # --- ingestion -----------------------------------------------------
     def observe(self, events: list[Event]):
         for ev in events:
             self._pending.append(ev)
-            if ev.notable:
+            # the event still rides along in the turn's prose; it just no
+            # longer COMPELS a turn to be spoken on its own
+            if ev.notable and not self._cosmetic_stat_change(ev):
                 self._notable = True
             # a Rest is a chosen recovery, not an enemy affliction — remember
             # it so _tick_afflictions doesn't have the gremlin litigate the

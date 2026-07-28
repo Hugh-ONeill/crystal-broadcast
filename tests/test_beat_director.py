@@ -925,3 +925,78 @@ def test_residual_ko_stays_bare_when_nothing_names_a_cause():
     ko = [e for e in evs if e.type == "ko"][0]
     assert ko.prose == "Blissey went down"
     assert ko.data["cause"] is None
+
+
+def test_cosmetic_stat_drop_does_not_compel_a_turn():
+    """Live 2026-07-28: beat "Clefable's Moonblast cut Kingambit's Special
+    Attack" -> FRACTURE: "THAT MOONBLAST WAS A DISASTER! My Kingambit is
+    sitting here with his Special Attack gutted". Kingambit is 135 Atk / 60
+    SpA; the drop is cosmetic. The inflation follows from the turn being
+    COMPELLED, so an unused-stat change must not mark it notable.
+    """
+    d = Director(stats_fn=_stats)
+    d.observe([Event("unboost", "Clefable's Moonblast cut Kingambit's "
+                     "Special Attack", side="us", notable=True,
+                     data={"mon": "Kingambit", "stat": "spa", "amount": 1})])
+    assert d._notable is False
+
+    # the same drop on the stat it actually uses still compels
+    d2 = Director(stats_fn=_stats)
+    d2.observe([Event("unboost", "Kingambit's Attack was cut", side="us",
+                      notable=True,
+                      data={"mon": "Kingambit", "stat": "atk", "amount": 1})])
+    assert d2._notable is True
+
+    # and a special attacker's SpA drop is not cosmetic either
+    d3 = Director(stats_fn=_stats)
+    d3.observe([Event("unboost", "Hatterene's Special Attack was cut",
+                      side="us", notable=True,
+                      data={"mon": "Hatterene", "stat": "spa", "amount": 1})])
+    assert d3._notable is True
+
+
+def test_cosmetic_stat_change_never_suppresses_a_mixed_attacker():
+    """The threshold exists to protect mixed attackers: Kyurem 130/130, Iron
+    Valiant 130/120, Kommo-o 110/100 all genuinely care about both stats."""
+    def mixed(name):
+        return {"Kyurem": (130, 130), "Iron Valiant": (130, 120)}.get(name)
+    d = Director(stats_fn=mixed)
+    for mon in ("Kyurem", "Iron Valiant"):
+        for stat in ("atk", "spa"):
+            ev = Event("unboost", f"{mon} drop", side="us", notable=True,
+                       data={"mon": mon, "stat": stat, "amount": 1})
+            assert d._cosmetic_stat_change(ev) is False, (mon, stat)
+
+
+def test_real_stats_beat_base_stats_for_commitment():
+    """User's point (2026-07-28): EVs and nature decide what a mon is BUILT to
+    do, and base stats can say "mixed" about a spread that is nothing of the
+    kind. Iron Valiant's base 130/120 reads mixed; the 252+ Atk build it
+    actually runs does not care about a Special Attack drop.
+
+    Showdown sends our own side's computed stats, so this is a lookup for us
+    and necessarily still a species-level guess for the opponent.
+    """
+    ev = Event("unboost", "Iron Valiant's Special Attack was cut", side="us",
+               notable=True,
+               data={"mon": "Iron Valiant", "stat": "spa", "amount": 1})
+
+    def base_only(name, side=None):
+        return {"Iron Valiant": (130, 120)}.get(name)
+
+    def real_for_us(name, side=None):
+        if side == "us" and name == "Iron Valiant":
+            return (359, 197)          # 252+ Atk, SpA uninvested
+        return {"Iron Valiant": (130, 120)}.get(name)
+
+    assert Director(stats_fn=base_only)._cosmetic_stat_change(ev) is False
+    assert Director(stats_fn=real_for_us)._cosmetic_stat_change(ev) is True
+
+
+def test_one_arg_stats_fn_still_supported():
+    """The gold-set eval and older callers pass stats_fn(name); the side-aware
+    form must stay optional or the eval breaks."""
+    d = Director(stats_fn=lambda name: {"Kingambit": (135, 60)}.get(name))
+    ev = Event("unboost", "cut", side="us", notable=True,
+               data={"mon": "Kingambit", "stat": "spa", "amount": 1})
+    assert d._cosmetic_stat_change(ev) is True
