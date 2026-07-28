@@ -1048,3 +1048,27 @@ def test_genuinely_bad_item_losses_keep_their_framing():
     ], role="p1")
     off = next(e for e in evs2 if e.type == "item_knocked_off")
     assert "Knock Off" in off.prose and "Leftovers" in off.prose
+
+
+def test_item_events_say_whose_item_it_was():
+    """Whose item fired IS the fact — the boost or the save belongs to a side.
+    `qual` only disambiguates a species mirror, so "Iron Crown's Booster Energy
+    kicked in" left the owner to be guessed. Live 2026-07-28, FRACTURE guessed
+    wrong about OUR Iron Crown ("THEY BROUGHT THE BOOST ENERGY! SKARMORY JUST
+    SNATCHED THE MOMENTUM") while the prompt's on-field block named ours
+    correctly — so stating it in the direction was not enough.
+    """
+    def scan(tok, role="p1", item="Booster Energy"):
+        sc = ProtocolScanner()
+        evs = sc.scan([
+            ["", "switch", tok, "Iron Crown", "100/100"],
+            ["", "-enditem", tok, item],
+        ], role=role)
+        return next(e for e in evs
+                    if e.type in ("item_used", "sash_saved",
+                                  "balloon_popped")).prose
+
+    assert scan("p1a: Iron Crown").startswith("our Iron Crown")
+    assert scan("p2a: Iron Crown").startswith("their Iron Crown")
+    assert scan("p1a: Iron Crown", item="Focus Sash").startswith("our ")
+    assert scan("p2a: Iron Crown", item="Air Balloon").startswith("their ")

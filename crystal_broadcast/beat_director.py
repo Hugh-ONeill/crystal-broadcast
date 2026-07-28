@@ -839,6 +839,19 @@ class ProtocolScanner:
                 flush()
                 mon = name_of(sm[2])        # bare species for data + matching
                 mon_q = qual(sm[2])         # our/their in a mirror, for prose
+                # For an ITEM, whose it is IS the fact — the boost, the save
+                # or the loss belongs to a side. `qual` only disambiguates a
+                # species mirror, so "Iron Crown's Booster Energy kicked in"
+                # left the owner to be guessed, and measured live 2026-07-28
+                # FRACTURE guessed wrong: "THEY BROUGHT THE BOOST ENERGY!
+                # SKARMORY JUST SNATCHED THE MOMENTUM" about OUR Iron Crown,
+                # with the on-field grounding block naming ours correctly in
+                # the same prompt. Telling her was not enough; the beat has to
+                # carry it.
+                if not mon_q.startswith(("our ", "their ")):
+                    _p = {"us": "our", "them": "their"}.get(side_of(sm[2]))
+                    if _p:
+                        mon_q = f"{_p} {mon_q}"
                 item = sm[3]
                 by = _from_cause(sm[4:])
                 ate = any("[eat]" in a for a in sm[4:])
