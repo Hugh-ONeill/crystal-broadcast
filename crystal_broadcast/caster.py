@@ -205,12 +205,25 @@ def _fix_species_spelling(line: str, item: dict) -> str:
     if not known or not line:
         return line
 
+    # match case-INSENSITIVELY: difflib scores "DONDONZO" against "Dondozo"
+    # far below the cutoff, so every shouted misspelling sailed through. That
+    # silently exempted FRACTURE's whole register, which is mostly caps —
+    # measured live 2026-07-28, "DONDONZO" survived twice in one game while
+    # the identical title-case slip was corrected.
+    canon = {k.lower(): k for k in known}
+
     def repl(m):
         tok = m.group(0)
         if tok in known:
             return tok
-        near = difflib.get_close_matches(tok, known, n=1, cutoff=0.8)
-        return near[0] if near else tok
+        near = difflib.get_close_matches(tok.lower(), list(canon),
+                                         n=1, cutoff=0.8)
+        if not near:
+            return tok
+        fixed = canon[near[0]]
+        # keep the shout: swapping DONDONZO for Dondozo mid-yell reads as a
+        # case glitch rather than a correction
+        return fixed.upper() if tok.isupper() else fixed
 
     return _SPECIES_TOKEN.sub(repl, line)
 

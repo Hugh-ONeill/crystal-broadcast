@@ -970,3 +970,23 @@ def test_type_claim_guard_binds_an_unnamed_tera_subject():
     assert c._bad_type_claim(
         "The Tera-Fairy was meant to neutralize the Scale Shot.",
         {"text": beat}) is None
+
+
+def test_species_spelling_fix_survives_shouting():
+    """FRACTURE speaks in caps, and difflib scores "DONDONZO" against
+    "Dondozo" far below the cutoff — so the correction was silently exempting
+    her entire register. Live 2026-07-28: "DONDONZO" survived twice in one
+    game while the identical title-case slip was corrected."""
+    from crystal_broadcast.caster import _fix_species_spelling
+    item = {"hud": {"us": "Kyurem", "them": "Dondozo"}}
+    shouted = _fix_species_spelling(
+        "THE SERVER DECIDED TO MAKE DONDONZO IMMORTAL!", item)
+    assert "DONDOZO" in shouted           # fixed AND still shouting
+    assert "Dondozo IMMORTAL" not in shouted
+    # the title-case path is unchanged
+    assert "Dondozo" in _fix_species_spelling("That Dondonzo is a wall.", item)
+    # an already-correct shout is left alone
+    assert "DONDOZO" in _fix_species_spelling("DONDOZO walls us.", item)
+    # unrelated words are not dragged toward a species
+    assert _fix_species_spelling("THE SERVER IS ROBBING ME!",
+                                 item) == "THE SERVER IS ROBBING ME!"
