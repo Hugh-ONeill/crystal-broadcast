@@ -315,6 +315,12 @@ _STATUS_INFLICT_PASSIVE = {
     "par": "{n} was paralyzed", "slp": "{n} was put to sleep",
     "psn": "{n} was poisoned", "tox": "{n} was badly poisoned",
 }
+# Causes where the mon statuses ITSELF. Nothing we did brought these on, so the
+# beat must not offer us the credit: a Toxic/Flame Orb activates on its holder
+# at end of turn and Rest is the holder's own move. Saying "we just helped it"
+# of a Gliscor's own Toxic Orb hands us agency we never had — the same class of
+# error as claiming we set hazards the opponent set.
+_SELF_INFLICTED_STATUS = {"toxic orb", "flame orb", "rest"}
 _STATUS_CURE = {
     "frz": "{n} thawed out", "slp": "{n} woke up",
     "par": "{n} shook off the paralysis", "brn": "{n}'s burn healed",
@@ -845,11 +851,33 @@ class ProtocolScanner:
                 # offensive setup (atk/spa/spe) threatens a sweep -> force a
                 # beat; a defensive/minor +1 just rides along
                 notable = amt >= 2 or sm[3] in ("atk", "spa", "spe")
+                # WHAT raised it — the mirror of the unboost attribution below,
+                # which this branch never got. A bare "Kingambit sharply raised
+                # its Attack" sitting in the same beat as "Kingambit's Iron
+                # Head landed" reads as one sentence, and the caster duly said
+                # "the Attack boost from Iron Head" — Iron Head does not boost.
+                # An unattributed +2 is unanswerable even to a human reading
+                # the transcript, which is the whole point of the record.
+                mon_q, mon = qual(sm[2]), name_of(sm[2])
+                abil = _from_ability(sm[4:])
+                holder = next((e.split("]", 1)[1].strip() for e in sm[4:]
+                               if e.startswith("[of]") and "]" in e), None)
+                lm = self._last_move
+                if abil:
+                    src = f"{qual(holder)}'s {abil}" if holder else abil
+                    prose = f"{mon_q}'s {stat} was {adv}raised by {src}"
+                    cause = abil
+                elif lm and lm[0] == mon:
+                    prose = f"{mon_q} {adv}raised its {stat} with {lm[1]}"
+                    cause = lm[1]
+                else:
+                    prose = f"{mon_q} {adv}raised its {stat}"
+                    cause = None
                 out.append(Event(
-                    "boost", f"{qual(sm[2])} {adv}raised its {stat}",
+                    "boost", prose,
                     side=side_of(sm[2]), notable=notable,
-                    data={"mon": name_of(sm[2]), "stat": sm[3],
-                          "amount": amt}))
+                    data={"mon": mon, "stat": sm[3],
+                          "amount": amt, "cause": cause}))
             elif t == "-unboost" and len(sm) > 4:
                 flush()
                 stat = _STAT.get(sm[3], sm[3])
@@ -1153,6 +1181,13 @@ def classify(ev: Event, stats_fn=None, ability_fn=None) -> Beat | None:
                     tail = (f" — that just feeds {mon}'s {name}" if certain
                             else f" — if that's the {name} set, it just fed it")
                     reg = "status-boon"
+                elif cause.lower() in _SELF_INFLICTED_STATUS:
+                    # they did this to themselves; it is their engine starting,
+                    # not our mistake
+                    tail = (f" — that switches on {mon}'s {name}" if certain
+                            else f" — if that's the {name} set, that just came"
+                                 f" online")
+                    reg = "status-backfire"
                 else:
                     tail = (f" — but that turns on {mon}'s {name}" if certain
                             else f" — but if that's the {name} set, we just "
