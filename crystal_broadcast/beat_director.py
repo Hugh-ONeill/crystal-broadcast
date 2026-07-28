@@ -621,9 +621,20 @@ class ProtocolScanner:
                 # branch above has always named its target; this is the same
                 # rule. Self-targeted moves read oddly with "on X", so skip it
                 # when mover and target are the same mon.
-                hit = f"{head} landed {_join_phrases(tags)}"
+                # Put the TARGET next to the verb, not at the end of the line.
+                # Naming it at all was the 2026-07-27 fix; trailing it after a
+                # clause like "landed not very effective and a heavy hit" was
+                # still weak enough to re-anchor — measured live 2026-07-28,
+                # "Kingambit's Iron Head landed not very effective and a heavy
+                # hit on Toxapex" came back as "Kingambit takes a heavy hit
+                # from that Iron Head", inverting who hit whom. "landed not
+                # very effective" is also not well-formed English (an
+                # adverbial conjoined to a noun phrase), which gives a model
+                # every excuse to re-read the sentence.
                 if target_disp and target_disp != mover_disp:
-                    hit += f" on {target_disp}"
+                    hit = f"{head} hit {target_disp} — {_join_phrases(tags)}"
+                else:
+                    hit = f"{head} landed {_join_phrases(tags)}"
                 out.append(Event(
                     "move_hit", hit,
                     side=target_side, notable=bool(notable),
@@ -679,6 +690,39 @@ class ProtocolScanner:
                                 if a.startswith("[from]") and "]" in a), None)
                     if src:
                         self._residual[key] = src.split(":")[-1].strip()
+                # A HEAL was previously bookkeeping only and emitted no event,
+                # so the record showed our hit and then a target back near
+                # full with nothing in between. Measured live 2026-07-28: a
+                # Toxapex kept clicking Recover and PRISM read six straight
+                # turns of "that puts Toxapex into range for a KO" while it sat
+                # at 99%. Undoing a hit is exactly as much of a swing as
+                # landing one, so it has to be said out loud.
+                if (t == "-heal" and frac is not None and old is not None
+                        and frac > old):
+                    gain = frac - old
+                    # passive trickles (Leftovers, Poison Heal ~6%) are noise;
+                    # a real recovery move puts back a third or more
+                    if gain >= 0.10:
+                        # flush FIRST: it emits the pending hit and only then
+                        # promotes the healer's own move into _last_move, which
+                        # is what lets us say "with Recover" instead of naming
+                        # whatever move happened to resolve before it
+                        flush()
+                        src = next((a.split("]", 1)[1].strip() for a in sm[4:]
+                                    if a.startswith("[from]") and "]" in a),
+                                   None)
+                        cause = src.split(":")[-1].strip() if src else None
+                        lm = self._last_move
+                        if not cause and lm and lm[0] == name_of(sm[2]):
+                            cause = lm[1]       # its own Recover/Roost/Soft-Boiled
+                        pct = int(round(frac * 100))
+                        prose = (f"{qual(sm[2])} healed back to {pct}%"
+                                 + (f" with {cause}" if cause else ""))
+                        out.append(Event(
+                            "heal", prose, side=side_of(sm[2]),
+                            notable=gain >= 0.25,
+                            data={"mon": name_of(sm[2]), "gain": gain,
+                                  "cause": cause, "hp": frac}))
                 if frac is not None:
                     self._hp[key] = frac
                 if (t == "-damage" and cur and old is not None

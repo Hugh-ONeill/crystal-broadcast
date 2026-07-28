@@ -679,8 +679,43 @@ def test_move_hit_names_its_target():
     ], role="p1")
     hits = [e for e in evs if e.type == "move_hit"]
     assert len(hits) == 1
-    assert "on Gliscor" in hits[0].prose
+    assert "Gliscor" in hits[0].prose
     assert hits[0].side == "us"          # we TOOK it
+    # the target must sit NEXT TO the verb. Trailing it ("...landed super
+    # effective and a devastating blow on Gliscor") still let a caster invert
+    # who hit whom, live on 2026-07-28.
+    assert hits[0].prose.startswith("Great Tusk's Ice Spinner hit Gliscor")
+
+
+def test_recovery_is_a_beat_and_names_its_source():
+    """Regression (live 2026-07-28): -heal was bookkeeping only, so a Toxapex
+    clicking Recover produced NO event. The record showed our hit landing and
+    the target back at 99% with nothing in between, and PRISM read six straight
+    turns of 'that puts Toxapex into range for a KO' while it sat at full."""
+    sc = ProtocolScanner()
+    evs = sc.scan([
+        ["", "move", "p1a: Kingambit", "Iron Head", "p2a: Toxapex"],
+        ["", "-damage", "p2a: Toxapex", "50/100"],
+        ["", "move", "p2a: Toxapex", "Recover", "p2a: Toxapex"],
+        ["", "-heal", "p2a: Toxapex", "99/100"],
+    ], role="p1")
+    heals = [e for e in evs if e.type == "heal"]
+    assert len(heals) == 1
+    assert "99%" in heals[0].prose
+    assert "Recover" in heals[0].prose          # the source, not a bare heal
+    assert heals[0].side == "them"
+    assert heals[0].data["cause"] == "Recover"
+
+
+def test_passive_heal_trickle_stays_silent():
+    """Leftovers/Poison Heal tick ~6% a turn. Emitting those would bury the
+    beat feed in noise the desk would then feel obliged to narrate."""
+    sc = ProtocolScanner()
+    evs = sc.scan([
+        ["", "-damage", "p2a: Toxapex", "50/100"],
+        ["", "-heal", "p2a: Toxapex", "56/100", "[from] item: Leftovers"],
+    ], role="p1")
+    assert not [e for e in evs if e.type == "heal"]
 
 
 def test_self_targeted_move_does_not_say_on_itself():
