@@ -857,6 +857,77 @@ class Caster:
         for mon, ttype in self._TERA_RE.findall(beat_text or ""):
             self._tera[mon.lower()] = ttype.title()
 
+    # a move dismissed as bad//ineffective. Kept separate from _RESIST_RE
+    # because these are not type words — they are verdicts on the move, and
+    # they are what slipped past the chart check.
+    _DUD_RE = re.compile(
+        r"\b(liabilit(?:y|ies)|useless|pointless|ineffective|wasted|"
+        r"did nothing|does nothing|accomplished nothing|no good)\b", re.I)
+
+    def _contradicts_beat_effectiveness(self, line: str,
+                                        item: dict) -> str | None:
+        """True when the line calls a move ineffective that the beat just
+        reported as super effective, or vice versa.
+
+        Cheaper and stricter than the chart check and catches a case it
+        cannot: measured live 2026-07-28, beat "Kommo-o's Shadow Claw hit
+        Kingambit — super effective and a heavy hit" -> PRISM said "The Ghost
+        Tera on Kingambit turned Shadow Claw into a liability". Ghost hits
+        Ghost for 2x and the beat SAYS so in the same sentence, but "liability"
+        is not type vocabulary so `_bad_type_claim` never looked.
+
+        Binds on the MOVE, not the species: the beat states a polarity per
+        move, so the move name is the one key that ties a claim to a fact.
+        """
+        beat = item.get("text") or ""
+        if not beat or not line:
+            return None
+        try:
+            from crystal_broadcast.game_data import DATA
+            moves = [m["name"] for m in DATA.gen.moves.values() if "name" in m]
+        except Exception:
+            return None
+        polarity = {}
+        for mv in moves:
+            if len(mv) < 4 or mv not in beat:
+                continue
+            # One move can be graded TWICE in a turn against different targets:
+            # "Icicle Spear landed not very effective on Cinderace; Icicle Spear
+            # knocked out Zapdos with super effective". Reading only the first
+            # clause flagged a correct line about the second. Collect every
+            # occurrence and refuse to rule when they disagree.
+            seen = set()
+            start = 0
+            while True:
+                i = beat.find(mv, start)
+                if i < 0:
+                    break
+                start = i + len(mv)
+                seg = beat[i:].split(";")[0]
+                if self._SUPER_RE.search(seg):
+                    seen.add("super")
+                elif self._RESIST_RE.search(seg) or self._IMMUNE_RE.search(seg):
+                    seen.add("weak")
+            if len(seen) == 1:
+                polarity[mv] = seen.pop()
+        # the claim must attach to exactly one move the beat graded, or there
+        # is no way to know which fact it contradicts
+        named = [mv for mv in polarity if mv in line]
+        named = [m for m in named if not any(m != o and m in o for o in named)]
+        if len(named) != 1:
+            return None
+        mv = named[0]
+        said_dud = bool(self._DUD_RE.search(line) or self._RESIST_RE.search(line)
+                        or self._IMMUNE_RE.search(line))
+        said_super = bool(self._SUPER_RE.search(line))
+        if polarity[mv] == "super" and said_dud and not said_super:
+            return (f"the beat reports {mv} as SUPER EFFECTIVE; the line calls "
+                    f"it ineffective")
+        if polarity[mv] == "weak" and said_super and not said_dud:
+            return (f"the beat reports {mv} as resisted/ineffective; the line "
+                    f"calls it super effective")
+        return None
+
     def _bad_type_claim(self, line: str, item: dict) -> str | None:
         """True when the line asserts a type matchup the chart contradicts.
 
@@ -1095,6 +1166,25 @@ class Caster:
                     retry = _fix_species_spelling(retry, item)
                     if retry and not self._fabricated_miss(retry, item):
                         line = retry
+                except Exception:
+                    pass
+            # cheapest first: the beat's own words contradict the line
+            contra = (self._contradicts_beat_effectiveness(line, item)
+                      if line else None)
+            if contra:
+                try:
+                    raw = await asyncio.to_thread(
+                        self._generate_sync, persona, item,
+                        f"WRONG: {contra}. Read the beat again and do not "
+                        "reverse what it reports.")
+                    retry = _sanitize(_SELF_LABEL.sub("", raw.strip()))
+                    retry = _fix_species_spelling(retry, item)
+                    if retry and not self._contradicts_beat_effectiveness(
+                            retry, item):
+                        line = retry
+                    else:
+                        print(f"caster: beat contradiction survived a regen "
+                              f"({contra})", flush=True)
                 except Exception:
                     pass
             # type-claim guard: the chart contradicts the stated matchup

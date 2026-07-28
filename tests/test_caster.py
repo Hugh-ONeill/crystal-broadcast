@@ -897,3 +897,58 @@ def test_type_claim_guard_regens_in_speak():
         "the regen nudge must carry the specific correction"
     assert c.transcript[-1][1].startswith("The crit finished"), \
         "the corrected line must be what reaches the transcript"
+
+
+_SE_BEAT = ("[BATTLE T4] Last exchange: Kingambit Terastallized into a Ghost "
+            "type; Kommo-o's Shadow Claw hit Kingambit — super effective and a "
+            "heavy hit; Kingambit's Iron Head hit Kommo-o — a devastating blow.")
+
+
+def test_beat_contradiction_catches_a_dismissed_super_effective_move():
+    """Live 2026-07-28: the beat said Shadow Claw was SUPER EFFECTIVE and PRISM
+    called it "a liability" in the next breath. The chart guard never looked —
+    "liability" is not type vocabulary — so this cheaper check is what covers
+    it, using only the beat's own words."""
+    c = Caster("http://unused", "test-model", expert_url=None)
+    v = c._contradicts_beat_effectiveness(
+        "The Ghost Tera on Kingambit turned Shadow Claw into a liability.",
+        {"text": _SE_BEAT})
+    assert v and "SUPER EFFECTIVE" in v
+
+
+def test_beat_contradiction_ignores_a_different_move():
+    c = Caster("http://unused", "test-model", expert_url=None)
+    assert c._contradicts_beat_effectiveness(
+        "Iron Head is doing all the work here.", {"text": _SE_BEAT}) is None
+
+
+def test_beat_contradiction_refuses_when_a_move_is_graded_twice():
+    """Corpus false positive: one move can be graded against TWO targets in a
+    turn — not very effective on Cinderace, super effective on the Zapdos it
+    KO'd. Reading only the first clause flagged a correct line about the
+    second, so conflicting grades mean the guard must not rule."""
+    beat = ("[BATTLE T20] our Kyurem's Icicle Spear landed not very effective "
+            "on Cinderace; our Kyurem's Icicle Spear knocked out Zapdos with "
+            "super effective.")
+    c = Caster("http://unused", "test-model", expert_url=None)
+    assert c._contradicts_beat_effectiveness(
+        "I absolutely crushed it with that super effective Icicle Spear!",
+        {"text": beat}) is None
+
+
+def test_beat_contradiction_regens_in_speak():
+    c = Caster("http://unused", "test-model", expert_url=None)
+    calls = []
+
+    def fake_gen(persona, item, nudge=None, temp_boost=0.0):
+        calls.append(nudge)
+        if nudge is None:
+            return "The Ghost Tera turned Shadow Claw into a liability."
+        return "Shadow Claw got through for a heavy hit."
+
+    c._generate_sync = fake_gen
+    c._ungrounded_entity = lambda line, item: None
+    asyncio.run(c.speak({"text": _SE_BEAT, "beats": [], "hud": None}))
+    assert len(calls) == 2
+    assert calls[1] and "SUPER EFFECTIVE" in calls[1]
+    assert c.transcript[-1][1].startswith("Shadow Claw got through")
