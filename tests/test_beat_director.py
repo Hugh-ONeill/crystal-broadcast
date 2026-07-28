@@ -49,7 +49,26 @@ def test_scanner_court_change_and_hazard_clear():
     types = [e.type for e in evs]
     assert "hazard_cleared" in types and "hazard_flip" in types
     cleared = next(e for e in evs if e.type == "hazard_cleared")
-    assert cleared.side == "us" and "our Spikes" in cleared.prose
+    # the possessive belongs to the SIDE, not the condition: "our Spikes" reads
+    # as the Spikes we set, which is how both personas came to invert a clear
+    assert cleared.side == "us" and "from our side" in cleared.prose
+
+
+def test_scanner_hazard_clear_names_the_spinner():
+    """A clear must say WHO did it. Passive prose ('our Stealth Rock was
+    cleared away by Rapid Spin') let the casters read our own successful spin
+    as the opponent robbing us, and claim we had set hazards the opponent set."""
+    sc = ProtocolScanner()
+    evs = sc.scan([
+        ["", "switch", "p1a: Iron Treads", "Iron Treads, L80", "100/100"],
+        ["", "move", "p1a: Iron Treads", "Rapid Spin", "p2a: Gliscor"],
+        ["", "-sideend", "p1: wiz", "Stealth Rock", "[from] move: Rapid Spin"],
+    ], role="p1")
+    cleared = next(e for e in evs if e.type == "hazard_cleared")
+    assert "Iron Treads" in cleared.prose          # the actor is named
+    assert "from our side" in cleared.prose        # location, not ownership
+    assert "our Stealth Rock" not in cleared.prose
+    assert cleared.data["user"] and "Iron Treads" in cleared.data["user"]
 
 
 def test_scanner_yawn_cause_captured():

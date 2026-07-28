@@ -982,14 +982,30 @@ class ProtocolScanner:
                 cond = _cond_name(sm[3])
                 low = cond.lower()
                 by = _from_move(sm[4:])
+                # Name the actor and keep the possessive on the SIDE, mirroring
+                # the setter above. "our Stealth Rock was cleared away by Rapid
+                # Spin" was passive and attached "our" to the condition, so it
+                # read as "the rocks WE set" rather than "the rocks on our
+                # side" — and both personas duly inverted it, FRACTURE claiming
+                # she set rocks the opponent had set and casting our own
+                # spinner as the thief, PRISM calling our own hazard removal
+                # "the loss of entry hazards". Whose side the hazard sat on is
+                # the entire tactical point, so it must not be guessable.
+                who, _cause = self._causer(sm[4:], qual, side_of, name_of)
                 if low in _HAZARDS or low in _SCREENS or low == "tailwind":
                     if by:
                         etype = ("hazard_cleared" if low in _HAZARDS
                                  else "side_cleared")
+                        if who:
+                            prose = (f"{who} cleared {cond} from "
+                                     f"{poss} side with {by}")
+                        else:
+                            prose = (f"{cond} was cleared from "
+                                     f"{poss} side by {by}")
                         out.append(Event(
-                            etype, f"{poss} {cond} was cleared away by {by}",
+                            etype, prose,
                             side=side_of(sm[2]), notable=True,
-                            data={"condition": cond, "by": by}))
+                            data={"condition": cond, "by": by, "user": who}))
                     elif low in _SCREENS:
                         out.append(Event(
                             "screens_wore_off", f"{poss} {cond} wore off",
