@@ -331,10 +331,16 @@ async def watch(url: str = DEFAULT_URL):
                     reply = (cat.get("speech")
                              or message.get("content") or "").strip()
                     stamp = time.strftime("%H:%M:%S")
+                    # Label with the speaker the caster actually chose. This
+                    # used to be hardcoded "Prism:", so every FRACTURE line in
+                    # a transcript was attributed to PRISM — which makes the
+                    # transcript useless for the one job it has, catching
+                    # mis-attribution and off-contract lines per persona.
+                    who = (data.get("persona") or "?").strip().title()
                     if beat:
                         print(f"\n[{stamp}] {beat}", flush=True)
                     if reply:
-                        print(f"    Prism: {reply}", flush=True)
+                        print(f"    {who}: {reply}", flush=True)
         except (KeyboardInterrupt, asyncio.CancelledError):
             raise
         except Exception as e:
