@@ -1072,3 +1072,49 @@ def test_item_events_say_whose_item_it_was():
     assert scan("p2a: Iron Crown").startswith("their Iron Crown")
     assert scan("p1a: Iron Crown", item="Focus Sash").startswith("our ")
     assert scan("p2a: Iron Crown", item="Air Balloon").startswith("their ")
+
+
+def _moves(mapping):
+    return lambda mon, side=None: mapping.get(mon, [])
+
+
+def test_revealed_moves_beat_base_stats_for_the_opponent():
+    """Their EV spread is never revealed, so base stats are the only fallback
+    and they UNDER-suppress: Iron Valiant's 130/120 reads "mixed" even when
+    the thing in front of us has only ever thrown physical attacks. What it
+    has actually clicked is evidence, and it sharpens every turn."""
+    ev = Event("unboost", "Iron Valiant's Special Attack was cut", side="them",
+               notable=True,
+               data={"mon": "Iron Valiant", "stat": "spa", "amount": 1})
+    stats = lambda name, side=None: {"Iron Valiant": (130, 120)}.get(name)
+
+    # base stats alone: mixed, so not suppressed
+    assert Director(stats_fn=stats)._cosmetic_stat_change(ev) is False
+    # two physical attacks revealed, no special: SpA is not in use
+    d = Director(stats_fn=stats,
+                 moves_fn=_moves({"Iron Valiant": ["physical", "physical"]}))
+    assert d._cosmetic_stat_change(ev) is True
+
+
+def test_revealed_moves_need_real_evidence():
+    """One attack proves nothing — most mons open with one — and a mixed read
+    must fall through. Over-suppression is the dangerous direction: a silenced
+    moment leaves nothing in the transcript to notice."""
+    ev = Event("unboost", "cut", side="them", notable=True,
+               data={"mon": "Iron Valiant", "stat": "spa", "amount": 1})
+    stats = lambda name, side=None: {"Iron Valiant": (130, 120)}.get(name)
+    for revealed in ([], ["physical"], ["physical", "special"],
+                     ["special", "physical", "physical"]):
+        d = Director(stats_fn=stats,
+                     moves_fn=_moves({"Iron Valiant": revealed}))
+        assert d._cosmetic_stat_change(ev) is False, revealed
+
+
+def test_revealed_moves_only_ever_add_suppression():
+    """A physical-only read must not UN-suppress a mon the stat ratio already
+    called committed."""
+    ev = Event("unboost", "cut", side="them", notable=True,
+               data={"mon": "Kingambit", "stat": "spa", "amount": 1})
+    d = Director(stats_fn=lambda n, s=None: {"Kingambit": (135, 60)}.get(n),
+                 moves_fn=_moves({"Kingambit": ["physical", "special"]}))
+    assert d._cosmetic_stat_change(ev) is True

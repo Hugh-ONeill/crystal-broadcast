@@ -1358,6 +1358,7 @@ class Director:
 
     def __init__(self, min_interval: float = 20.0, min_swing: float = 0.10,
                  floor: float = 5.0, stats_fn=None, ability_fn=None,
+                 moves_fn=None,
                  min_turn_gap: int = 0, quiet_turn_gap: int = 3):
         # Turn gating (min_turn_gap > 0) replaces the wall-clock floor and
         # interval. Under PTS scheduling the audience watches on the CLIENT's
@@ -1374,6 +1375,10 @@ class Director:
         self.floor = floor
         self.stats_fn = stats_fn
         self.ability_fn = ability_fn
+        # mon -> the categories of the damaging moves it has been SEEN
+        # to use; the opponent-side substitute for an EV spread we can
+        # never observe
+        self.moves_fn = moves_fn
         self.reset()
 
     def reset(self):
@@ -1422,6 +1427,37 @@ class Director:
         except TypeError:
             return self.stats_fn(mon)
 
+    # How many damaging moves must be revealed before their categories count
+    # as evidence. One physical attack proves nothing — most mons open with
+    # one — and over-suppression is the dangerous direction here, because a
+    # silenced moment leaves nothing in the transcript to notice. Two of a
+    # kind with none of the other is half a moveset pointing one way.
+    REVEALED_MOVE_EVIDENCE = 2
+
+    def _revealed_commitment(self, mon: str, side: str | None) -> str | None:
+        """'physical' / 'special' from what a mon has actually CLICKED, or
+        None when the evidence is thin or mixed.
+
+        This is the opponent-side answer to a question our own side gets for
+        free. We know our EV spread exactly; theirs is never revealed, so base
+        stats are the only fallback and they under-suppress — a 252+ Atk Iron
+        Valiant reads "mixed" at 130/120. What they have actually thrown is
+        evidence rather than inference, and it sharpens every turn.
+        """
+        if self.moves_fn is None or not mon:
+            return None
+        try:
+            cats = self.moves_fn(mon, side)
+        except TypeError:
+            cats = self.moves_fn(mon)
+        except Exception:
+            return None
+        cats = [c for c in (cats or []) if c in ("physical", "special")]
+        if len(cats) < self.REVEALED_MOVE_EVIDENCE:
+            return None
+        seen = set(cats)
+        return seen.pop() if len(seen) == 1 else None
+
     def _cosmetic_stat_change(self, ev: Event) -> bool:
         """True when a stat change lands on an attacking stat the mon does not
         use. Such a change is real but inconsequential, and letting it mark the
@@ -1443,6 +1479,15 @@ class Director:
         atk, spa = stats
         if not atk or not spa:
             return False
+        # What it has actually thrown outranks what its species could do: a
+        # mon that has only clicked physical attacks is not using SpA whatever
+        # the spread says. Only ever ADDS suppression, never removes it, so a
+        # thin or mixed read falls through to the stat ratio unchanged.
+        commit = self._revealed_commitment(ev.data.get("mon"), ev.side)
+        if commit == "physical" and stat == "spa":
+            return True
+        if commit == "special" and stat == "atk":
+            return True
         if stat == "spa":
             return atk / spa >= self.STAT_COMMITMENT_RATIO
         return spa / atk >= self.STAT_COMMITMENT_RATIO

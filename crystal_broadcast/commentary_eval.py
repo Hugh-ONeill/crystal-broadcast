@@ -204,7 +204,18 @@ def run_director(entry: dict) -> tuple[list, object, list[str], object]:
                 for k, v in fx.get("abilities", {}).items()}
         ability_fn = ((lambda name, side: amap.get(name.lower(), set()))
                       if amap else None)
-        director = Director(stats_fn=DATA.stats, ability_fn=ability_fn)
+        # optional inline REVEALED-MOVE map for stat-relevance entries:
+        # {mon_display: [physical|special, ...]} — the categories of the
+        # damaging moves that mon has been seen to use. Live this comes from
+        # poke-env's retained movesets; a fixture states it directly, which is
+        # what makes "a Special Attack drop on a mon that only clicks physical
+        # is not worth a beat" checkable offline.
+        mmap = {k.lower(): [str(c).lower() for c in v]
+                for k, v in fx.get("revealed_moves", {}).items()}
+        moves_fn = ((lambda name, side=None: mmap.get(name.lower(), []))
+                    if mmap else None)
+        director = Director(stats_fn=DATA.stats, ability_fn=ability_fn,
+                            moves_fn=moves_fn)
         for batch in fx.get("batches", []):
             director.observe(scanner.scan(batch, fx.get("role")))
         # injected (non-protocol) events: belief deltas, notes — the player
