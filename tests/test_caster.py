@@ -5,6 +5,7 @@ seams the gold-set runner will."""
 import asyncio
 import json
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -1005,3 +1006,56 @@ def test_species_spelling_fix_survives_shouting():
     # unrelated words are not dragged toward a species
     assert _fix_species_spelling("THE SERVER IS ROBBING ME!",
                                  item) == "THE SERVER IS ROBBING ME!"
+
+
+def test_speech_playback_never_overlaps():
+    """Heard on take 13: playback was a bare Popen per line, so a handoff pair
+    spoke simultaneously and consecutive beats stacked — they talked over each
+    other AND over themselves. Clips must play strictly one at a time."""
+    import types
+    import crystal_broadcast.speech as sp
+    s = sp.Speech(url="http://127.0.0.1:9", play=True)
+    order = []
+
+    def fake_run(cmd, **kw):
+        tag = kw.get("input")
+        order.append(("start", tag))
+        time.sleep(0.05)
+        order.append(("end", tag))
+        return types.SimpleNamespace(returncode=0)
+
+    real_run, sp.subprocess.run = sp.subprocess.run, fake_run
+    try:
+        for i in range(3):
+            s._play(f"clip{i}".encode(), None)
+        s._plays.join()
+    finally:
+        sp.subprocess.run = real_run
+    kinds = [k for k, _ in order]
+    assert kinds == ["start", "end"] * 3, order
+
+
+def test_backlog_drop_skips_a_line_when_speech_is_behind():
+    """The per-beat budget only trims a handoff pair; it cannot see speech
+    still in flight from EARLIER beats. Without this, busy stretches queue
+    faster than they can be spoken and drift away from the picture."""
+    import types
+    c = Caster("http://unused", "test-model", expert_url=None,
+               speech_budget=8.0)
+    c.speech = types.SimpleNamespace(speak=lambda *a, **k: 1.0)
+    c._speaking_until = time.monotonic() + 30  # 30s already queued
+    c._generate_sync = lambda p, i, n=None, t=0.0: "should not be spoken"
+    c._ungrounded_entity = lambda l, i: None
+    asyncio.run(c.speak({"text": "[BATTLE T5] x", "beats": [], "hud": None}))
+    assert not c.transcript                   # dropped, not voiced
+
+    # the opening and the verdict are exempt — missing those is worse than late
+    c2 = Caster("http://unused", "test-model", expert_url=None,
+                speech_budget=8.0)
+    c2.speech = types.SimpleNamespace(speak=lambda *a, **k: 1.0)
+    c2._speaking_until = time.monotonic() + 30
+    c2._generate_sync = lambda p, i, n=None, t=0.0: "the verdict"
+    c2._ungrounded_entity = lambda l, i: None
+    asyncio.run(c2.speak({"text": "[RESULT] WIN vs X.", "beats": [],
+                          "hud": None}))
+    assert c2.transcript, "RESULT must still speak when audio is behind"

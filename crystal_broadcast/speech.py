@@ -13,6 +13,7 @@ missing voice must never cost a line.
 from __future__ import annotations
 
 import json
+import queue
 import subprocess
 import threading
 import urllib.error
@@ -40,16 +41,32 @@ class Speech:
     """
 
     def __init__(self, url: str = DEFAULT_URL, play: bool = True,
-                 out_dir: str | None = None, timeout: float = 30.0):
+                 out_dir: str | None = None, timeout: float = 30.0,
+                 sink: str | None = None):
         self.url = url.rstrip("/")
         self.play = play
         self.timeout = timeout
+        # Playback target. A recorder can only capture audio that reached a
+        # SINK, so a take needs playback — but playing to the default sink
+        # means a seven-minute take is audible in the room, and which device
+        # that even is changes when headphones come and go. Pointing at a null
+        # sink keeps the capture and drops the noise.
+        self.sink = sink
         self.out_dir = Path(out_dir) if out_dir else None
         if self.out_dir:
             self.out_dir.mkdir(parents=True, exist_ok=True)
         self._seconds: dict[tuple[str, str], float] = {}
         self._lock = threading.Lock()
         self._seq = 0
+        # ONE playback thread, fed by a queue. Playback used to be a bare
+        # Popen per line, so every clip started the moment it finished
+        # rendering: a handoff pair spoke simultaneously, and consecutive
+        # beats stacked on top of each other. Heard on take 13 — they talked
+        # over each other AND over themselves. A clip must never begin before
+        # the previous one ends.
+        self._plays: queue.Queue = queue.Queue()
+        self._player = threading.Thread(target=self._play_loop, daemon=True)
+        self._player.start()
 
     # --- health -------------------------------------------------------
     def available(self) -> bool:
@@ -101,17 +118,32 @@ class Speech:
         return seconds
 
     def _play(self, audio: bytes, path: Path | None) -> None:
-        """Best effort. A missing player must not raise into the caster."""
-        try:
-            if path is not None:
-                subprocess.Popen(["paplay", str(path)],
-                                 stdout=subprocess.DEVNULL,
-                                 stderr=subprocess.DEVNULL)
-            else:
-                p = subprocess.Popen(["paplay"], stdin=subprocess.PIPE,
-                                     stdout=subprocess.DEVNULL,
-                                     stderr=subprocess.DEVNULL)
-                p.stdin.write(audio)
-                p.stdin.close()
-        except Exception:
-            pass
+        """Hand the clip to the player thread. Never plays inline: overlapping
+        speech is worse than late speech."""
+        self._plays.put((audio, path))
+
+    def _play_loop(self) -> None:
+        """Play queued clips strictly one at a time, blocking on each."""
+        while True:
+            audio, path = self._plays.get()
+            cmd = ["paplay"]
+            if self.sink:
+                cmd.append(f"--device={self.sink}")
+            try:
+                if path is not None:
+                    subprocess.run(cmd + [str(path)],
+                                   stdout=subprocess.DEVNULL,
+                                   stderr=subprocess.DEVNULL, check=False)
+                else:
+                    subprocess.run(cmd, input=audio,
+                                   stdout=subprocess.DEVNULL,
+                                   stderr=subprocess.DEVNULL, check=False)
+            except Exception:
+                pass          # a missing player must not kill the thread
+            finally:
+                self._plays.task_done()
+
+    def backlog(self) -> int:
+        """Clips still waiting to play. A non-zero backlog means anything new
+        would land on top of speech already in flight."""
+        return self._plays.qsize()

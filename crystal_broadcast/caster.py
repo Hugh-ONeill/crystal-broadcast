@@ -1163,6 +1163,23 @@ class Caster:
             # known. This cheap check only skips a generation that cannot
             # possibly fit. Both are inert without a duration source, so
             # text-only pacing is byte-for-byte unchanged.
+            # CROSS-BEAT gate. The per-beat budget below only trims a handoff
+            # pair; it cannot see speech still in flight from EARLIER beats,
+            # and on take 13 that is what stacked up — busy stretches queued
+            # faster than they could be spoken, so lines landed on top of
+            # each other and drifted away from the picture. If audio is
+            # already backed up past the floor, this line would be late as
+            # well as overlapping, so drop it. MATCH START and RESULT are
+            # exempt: missing the opening or the verdict is worse than late.
+            if (self.speech is not None and self.speech_budget is not None
+                    and self._speaking_backlog() >= self.speech_budget
+                    and not item["text"].startswith(("[MATCH START]",
+                                                     "[RESULT]"))):
+                self._pace_stats["preflight_drops"] += 1
+                print(f"caster: backlog dropped {persona} — "
+                      f"{self._speaking_backlog():.1f}s of speech still "
+                      f"queued", flush=True)
+                break
             if (idx and self.speech_budget is not None
                     and spent >= self.speech_budget):
                 self._pace_stats["preflight_drops"] += 1
@@ -1454,6 +1471,8 @@ async def main():
     ap.add_argument("--speech-out", default=None, metavar="DIR",
                     help="also keep the rendered wavs here, for a recorded "
                          "take or a viseme pass")
+    ap.add_argument("--speech-sink", default=None, metavar="SINK",
+                    help="play into this sink instead of the default. A null sink keeps the recorder's capture while leaving the room silent")
     ap.add_argument("--no-play", action="store_true",
                     help="render speech but do not play it (useful when the "
                          "recorder is capturing a different audio sink)")
@@ -1475,7 +1494,8 @@ async def main():
     if args.speech:
         from crystal_broadcast.speech import DEFAULT_URL, Speech
         speech = Speech(url=args.speech_url or DEFAULT_URL,
-                        play=not args.no_play, out_dir=args.speech_out)
+                        play=not args.no_play, out_dir=args.speech_out,
+                        sink=args.speech_sink)
         # say so at startup rather than discovering it line by line: a silent
         # broadcast that was MEANT to have audio is the confusing failure
         if speech.available():
