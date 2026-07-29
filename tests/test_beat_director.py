@@ -1124,3 +1124,45 @@ def test_revealed_moves_only_ever_add_suppression():
     d = Director(stats_fn=lambda n, s=None: {"Kingambit": (135, 60)}.get(n),
                  moves_fn=_moves({"Kingambit": ["physical", "special"]}))
     assert d._cosmetic_stat_change(ev) is True
+
+
+def test_spin_with_nothing_to_clear_says_so():
+    """The record was silent about hazards during a long Rapid Spin stretch,
+    so both casters invented one — six hazard-clear claims in take 26. A clear
+    that never happens emits no event, so the beat has to state the absence."""
+    sc = ProtocolScanner()
+    evs = sc.scan([
+        ["", "switch", "p1a: Iron Treads", "Iron Treads", "100/100"],
+        ["", "switch", "p2a: Zapdos", "Zapdos", "100/100"],
+        ["", "move", "p1a: Iron Treads", "Rapid Spin", "p2a: Zapdos"],
+        ["", "-damage", "p2a: Zapdos", "91/100"],
+    ], role="p1")
+    note = [e for e in evs if e.type == "spin_no_hazards"]
+    assert note and "no hazards to clear" in note[0].prose
+    assert not note[0].notable          # colour, never forces a turn
+
+
+def test_spin_that_really_clears_stays_quiet_about_absence():
+    sc = ProtocolScanner()
+    evs = sc.scan([
+        ["", "switch", "p1a: Iron Treads", "Iron Treads", "100/100"],
+        ["", "switch", "p2a: Zapdos", "Zapdos", "100/100"],
+        ["", "-sidestart", "p1: wiz", "Stealth Rock"],
+        ["", "move", "p1a: Iron Treads", "Rapid Spin", "p2a: Zapdos"],
+        ["", "-sideend", "p1: wiz", "Stealth Rock", "[from] move: Rapid Spin"],
+    ], role="p1")
+    assert not [e for e in evs if e.type == "spin_no_hazards"]
+    assert [e for e in evs if e.type == "hazard_cleared"]
+
+
+def test_spin_only_clears_the_users_own_side():
+    """Their rocks are up, ours are clean — Rapid Spin clears the USER's side,
+    so it still had nothing to clear."""
+    sc = ProtocolScanner()
+    evs = sc.scan([
+        ["", "switch", "p1a: Iron Treads", "Iron Treads", "100/100"],
+        ["", "switch", "p2a: Zapdos", "Zapdos", "100/100"],
+        ["", "-sidestart", "p2: opp", "Stealth Rock"],
+        ["", "move", "p1a: Iron Treads", "Rapid Spin", "p2a: Zapdos"],
+    ], role="p1")
+    assert [e for e in evs if e.type == "spin_no_hazards"]

@@ -381,6 +381,14 @@ _SYNERGY_NAME = {
 _HAZARDS = {"stealth rock", "spikes", "toxic spikes", "sticky web",
             "g-max steelsurge"}
 _SCREENS = {"reflect", "light screen", "aurora veil"}
+# Moves whose NAME implies hazard removal. Measured on take 26: our Iron
+# Treads clicked Rapid Spin for the Speed boost and chip across a long
+# attrition stretch with NO hazards on the field, and both casters invented an
+# entire hazard narrative to explain it — "we cleared the hazards", "the
+# hazards are gone", six times. Reason-from-the-name again, like Good as Gold
+# and the Tera-Fairy. Nothing in the record contradicted them because a clear
+# that never happened emits no event, so the beat has to say so out loud.
+_HAZARD_REMOVAL = {"rapid spin", "mortal spin", "tidy up", "defog"}
 _WEATHER = {
     "raindance": "rain", "sunnyday": "harsh sun", "sandstorm": "a sandstorm",
     "snow": "snow", "hail": "hail", "snowscape": "snow",
@@ -470,6 +478,9 @@ class ProtocolScanner:
         # slot -> last residual damage source, for naming a
         # non-move KO's actual cause
         self._residual: dict = {}
+        # side key -> hazards currently up, so a removal move can be told
+        # apart from a removal move with nothing to remove
+        self._hazards_up: dict = {"p1": set(), "p2": set()}
         # position -> species, from switch/drag/replace details: protocol
         # position tokens carry NICKNAMES ("p1a: Speak Softly"), and prose
         # built from them leaks the nickname ("knocked off Speak Softly" —
@@ -598,6 +609,26 @@ class ProtocolScanner:
             move_name = cur["move"]
             if cur.get("via"):
                 move_name += f" (via {cur['via']})"
+            # A removal move with nothing to remove. Emitted as colour (not
+            # notable, so it never forces a turn) purely to contradict the
+            # name: without it the record is silent about hazards and the
+            # casters fill that silence with a clear that never happened.
+            if (cur["move"].lower() in _HAZARD_REMOVAL
+                    and cur.get("mover_pos")):
+                # side conditions are keyed "p1"/"p2" but a position token is
+                # "p1a: Iron Treads" — take the side, not the slot
+                mkey = cur["mover_pos"].split(":")[0][:2]
+                okey = "p2" if mkey == "p1" else "p1"
+                # Defog reaches both sides; the spins only clear the user's
+                relevant = ({mkey, okey} if cur["move"].lower() == "defog"
+                            else {mkey})
+                if not any(self._hazards_up.get(k) for k in relevant):
+                    out.append(Event(
+                        "spin_no_hazards",
+                        f"{mover_disp}'s {cur['move']} had no hazards to "
+                        f"clear — it was thrown for the chip and the boost",
+                        side=side_of(cur["mover_pos"]),
+                        data={"mon": cur["mover"], "move": cur["move"]}))
             head = f"{mover_disp}'s {move_name}"
             mover_side = cur.get("mover_side")
             target_side = ({"us": "them", "them": "us"}.get(mover_side)
@@ -1092,6 +1123,9 @@ class ProtocolScanner:
                 poss = side_poss(sm[2])
                 cond = _cond_name(sm[3])
                 low = cond.lower()
+                if low in _HAZARDS:
+                    self._hazards_up.setdefault(
+                        sm[2].split(":")[0], set()).add(low)
                 # setting hazards/screens is routine tempo — record it, but
                 # don't force a beat (removing them below IS a swing)
                 who, cause = self._causer(sm[4:], qual, side_of, name_of)
@@ -1119,6 +1153,8 @@ class ProtocolScanner:
                 poss = side_poss(sm[2])
                 cond = _cond_name(sm[3])
                 low = cond.lower()
+                self._hazards_up.setdefault(
+                    sm[2].split(":")[0], set()).discard(low)
                 by = _from_move(sm[4:])
                 # Name the actor and keep the possessive on the SIDE, mirroring
                 # the setter above. "our Stealth Rock was cleared away by Rapid

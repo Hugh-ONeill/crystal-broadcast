@@ -1055,6 +1055,42 @@ class Caster:
             return f"{move} is NOT super effective on {mon} ({atk} into {typing} is {mult}x)"
         return None
 
+    _CLEARED_RE = re.compile(
+        r"\b(cleared|clearing|clear|removed|removing|remove|removal|spun|"
+        r"spinning|swept|sweeping|gone|blown away)\b", re.I)
+    _HAZARD_WORD_RE = re.compile(
+        r"\b(hazards?|stealth rock|spikes|toxic spikes|sticky web|rocks)\b",
+        re.I)
+
+    @staticmethod
+    def _fabricated_hazard_clear(line: str, item: dict) -> bool:
+        """True when the line says hazards came off and the beat reports no
+        such thing.
+
+        Measured on take 26: Iron Treads clicked Rapid Spin for the chip and
+        the Speed boost across a long attrition stretch with NOTHING on the
+        field, and both voices narrated a hazard clear six times over — "we
+        cleared the hazards", "the hazards are gone". The move's NAME was the
+        only evidence, which is the Good as Gold failure wearing a different
+        hat. The director now states when a spin had nothing to clear; this is
+        the backstop for when it says nothing at all.
+        """
+        # "spin them away" reads as a clear, but bare "spin" cannot: the move
+        # is named legitimately all the time ("the search is choosing Rapid
+        # Spin"), so require the phrase, not the word.
+        spun_away = re.search(r"\bspin\w*\b[^.]{0,30}\baway\b", line, re.I)
+        if not ((Caster._CLEARED_RE.search(line) or spun_away)
+                and Caster._HAZARD_WORD_RE.search(line)):
+            return False
+        # Ground on whether the beat mentions hazards AT ALL, not on whether
+        # it says "cleared". A beat reporting rocks going UP makes "Rapid Spin
+        # to clear them" a correct statement of intent — flagging that was a
+        # false positive on the corpus. Only a beat that never mentions a
+        # hazard leaves the claim unsupported, which is exactly the take-26
+        # case: the record was silent and the move's name filled the gap.
+        beat = item.get("text") or ""
+        return not Caster._HAZARD_WORD_RE.search(beat)
+
     @staticmethod
     def _fabricated_miss(line: str, item: dict) -> bool:
         """True when the line claims a move MISSED and the beat never said so.
@@ -1289,6 +1325,24 @@ class Caster:
                     else:
                         print(f"caster: bad type claim survived a regen "
                               f"({bad_type})", flush=True)
+                except Exception:
+                    pass
+            # invented hazard clear: the move's name is not evidence
+            if line and self._fabricated_hazard_clear(line, item):
+                try:
+                    raw = await asyncio.to_thread(
+                        self._generate_sync, persona, item,
+                        "Do NOT say hazards were cleared, removed or spun "
+                        "away — the beat reports no hazard leaving the field. "
+                        "A move called Rapid Spin does not prove one was "
+                        "there. React to what the beat actually reports.")
+                    retry = _sanitize(_SELF_LABEL.sub("", raw.strip()))
+                    retry = _fix_species_spelling(retry, item)
+                    if retry and not self._fabricated_hazard_clear(retry, item):
+                        line = retry
+                    else:
+                        print("caster: invented hazard clear survived a regen",
+                              flush=True)
                 except Exception:
                     pass
             if line and self._fabricated_crit(line, item):

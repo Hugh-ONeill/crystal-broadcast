@@ -1084,3 +1084,46 @@ def test_starved_voice_takes_the_lead_back():
     asyncio.run(c.speak({"text": "[BATTLE T6] x", "beats": beats,
                          "hud": None}))
     assert calls[0] == "FRACTURE"
+
+
+def test_invented_hazard_clear_is_caught():
+    """Take 26: Iron Treads clicked Rapid Spin for chip and a Speed boost
+    across a long attrition stretch with NOTHING on the field, and both voices
+    narrated a hazard clear six times — "we cleared the hazards", "the hazards
+    are gone". The move's NAME was the only evidence, which is the Good as
+    Gold failure wearing a different hat."""
+    c = Caster("http://unused", "test-model", expert_url=None)
+    silent = "[BATTLE T33] Last exchange: Iron Treads raised its Speed with Rapid Spin."
+    for line in ("The search continues to prioritize the hazard removal.",
+                 "The hazards are gone.",
+                 "We spent Iron Treads' utility just to clear the hazard.",
+                 "I WAS READY TO SPIN THE HAZARDS AWAY!"):
+        assert c._fabricated_hazard_clear(line, {"text": silent}), line
+
+
+def test_hazard_talk_is_fine_when_the_beat_mentions_hazards():
+    """Corpus false positive: a beat reporting rocks going UP makes "Rapid Spin
+    to clear them" a correct statement of intent, not a fabrication."""
+    c = Caster("http://unused", "test-model", expert_url=None)
+    up = ("[BATTLE T4] Last exchange: Ting-Lu set Stealth Rock on our side. "
+          "We go for Rapid Spin.")
+    assert not c._fabricated_hazard_clear(
+        "The search is opting for Rapid Spin to clear them.", {"text": up})
+    cleared = ("[BATTLE T8] our Iron Treads cleared Stealth Rock from our "
+               "side with Rapid Spin.")
+    assert not c._fabricated_hazard_clear(
+        "Iron Treads cleared the rocks off our side.", {"text": cleared})
+    # and the director's own "nothing to clear" note grounds a reaction to it
+    note = ("[BATTLE T9] our Iron Treads's Rapid Spin had no hazards to "
+            "clear — it was thrown for the chip and the boost.")
+    assert not c._fabricated_hazard_clear(
+        "No hazards to clear, so that was chip and speed.", {"text": note})
+
+
+def test_naming_rapid_spin_is_not_a_claim():
+    """Bare "spin" cannot count as a clear-word: the move is named
+    legitimately all the time."""
+    c = Caster("http://unused", "test-model", expert_url=None)
+    assert not c._fabricated_hazard_clear(
+        "The search is choosing Rapid Spin for the chip damage.",
+        {"text": "[BATTLE T33] Iron Treads raised its Speed with Rapid Spin."})
