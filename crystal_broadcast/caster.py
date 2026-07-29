@@ -365,13 +365,14 @@ class Caster:
         # consecutive speech drops per persona, so a starved voice can take
         # the lead back (see the rotation in speak())
         self._drops: dict = {}
-        # Consecutive drops before a voice takes the lead back. At 2 the
-        # trailing voice leads once per two drops, i.e. a third of contested
-        # beats — measured 4:11 on take 25, against a 2:1 target. At 1 it
-        # alternates, which is as far as this lever goes; the rest of the
-        # skew is beat MIX (gremlin-only interrupts vs analyst-only reads)
-        # and is by design.
-        self.STARVED_AFTER = 1
+        # Consecutive drops before a voice takes the lead back. MEASURED at
+        # 2 over two full takes: 1.6:1 and 1.3:1 gremlin-to-analyst, against a
+        # 2:1 ideal and 3:1 acceptable — so 2 already lands slightly MORE
+        # balanced than wanted. Briefly set to 1 off a mid-take sample that
+        # read 4:11; the completed games were 25:40 and 19:24, and alternating
+        # would push further toward the analyst. RAISE this (3+) to give the
+        # gremlin more of the contested beats, do not lower it.
+        self.STARVED_AFTER = 2
         # how many grounded facts ride along on a beat, and how many of those
         # are held back for the two actives' abilities (see _gather_facts).
         # The cap is a latency budget: each fact is an expert round-trip.
