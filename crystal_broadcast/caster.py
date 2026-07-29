@@ -362,6 +362,9 @@ class Caster:
         # so this is not a decoration: checking a claim against the dex entry
         # of a Terastallized mon checks a typing that left the field.
         self._tera: dict = {}
+        # consecutive speech drops per persona, so a starved voice can take
+        # the lead back (see the rotation in speak())
+        self._drops: dict = {}
         # how many grounded facts ride along on a beat, and how many of those
         # are held back for the two actives' abilities (see _gather_facts).
         # The cap is a latency budget: each fact is an expert round-trip.
@@ -1145,6 +1148,15 @@ class Caster:
         self._pace_stats["voiced"] += 1
         spent = 0.0        # speech seconds committed by this beat
         speakers = _speakers(item["beats"], item["text"])
+        # Both speech gates cut the LATER voice, and the handoff convention
+        # puts the gremlin first on interrupts — so "drop the second" silently
+        # meant "always drop PRISM". Measured on take 22: 25 PRISM drops
+        # against 4, and a match that was 20 FRACTURE lines to 5. Rotate the
+        # lead when the trailing voice has been starved, so the cost of a
+        # tight budget lands on whoever has been speaking, not on whoever the
+        # convention happens to put second.
+        if len(speakers) > 1 and self._drops.get(speakers[-1], 0) >= 2:
+            speakers = list(reversed(speakers))
         deliberating = any(b.get("beat") == "deep_think"
                            for b in item.get("beats") or [])
         # fetch grounded facts once per beat if PRISM will speak (off the
@@ -1179,6 +1191,7 @@ class Caster:
                 print(f"caster: backlog dropped {persona} — "
                       f"{self._speaking_backlog():.1f}s of speech still "
                       f"queued", flush=True)
+                self._drops[persona] = self._drops.get(persona, 0) + 1
                 break
             if (idx and self.speech_budget is not None
                     and spent >= self.speech_budget):
@@ -1186,6 +1199,7 @@ class Caster:
                 print(f"caster: pre-flight dropped {persona} — {spent:.2f}s "
                       f"already fills the {self.speech_budget:.1f}s budget",
                       flush=True)
+                self._drops[persona] = self._drops.get(persona, 0) + 1
                 break
             try:
                 raw = await asyncio.to_thread(self._generate_sync,
@@ -1378,6 +1392,7 @@ class Caster:
                       f"{secs:.2f}s exceeds the {self.speech_budget:.1f}s "
                       f"budget", flush=True)
                 break
+            self._drops[persona] = 0      # spoke: no longer starved
             self.transcript.append((persona, line))
             if deliberating and persona == "FRACTURE":
                 self._match_stalls.append(line)

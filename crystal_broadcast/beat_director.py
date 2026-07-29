@@ -521,6 +521,16 @@ class ProtocolScanner:
             s = side_of(side_token)
             return {"us": "our", "them": "their"}.get(s, "one")
 
+        def sided(species, s) -> str:
+            """Species display ALWAYS prefixed 'our '/'their '. Unlike
+            qual_species this does not wait for a mirror: on a move, whose it
+            is IS the fact, and an unmarked name is the thing casters invert.
+            role=None (the offline eval) still no-ops, so fixtures without a
+            side are unchanged."""
+            if not species or not s:
+                return species
+            return f"{'our' if s == 'us' else 'their'} {species}"
+
         def qual_species(species, s) -> str:
             """Mirror-match qualifier for an ALREADY-RESOLVED species.
 
@@ -571,10 +581,19 @@ class ProtocolScanner:
             # from re-resolving the position token: flush() is DEFERRED to the
             # next move, and a faint + switch-in repoints the slot before it
             # runs. Side still comes from the token, which does not move.
-            mover_disp = (qual_species(cur["mover"], side_of(cur["mover_pos"]))
+            # ALWAYS mark the side on a move, not just in a species mirror.
+            # Who threw it is the fact a caster most often gets backwards:
+            # measured on take 22, "Iron Valiant's Focus Blast knocked out
+            # Kingambit" (ours) became "THEY CLICKED FOCUS BLAST", and
+            # "Cinderace's Pyro Ball knocked out Kommo-o" (theirs) became "I
+            # HAD NO CHOICE BUT TO CLICK PYRO BALL". The beats she got RIGHT
+            # in that match were exactly the ones a mirror happened to mark.
+            # Costs a little length; the alternative is leaving the single
+            # most invertible fact in the beat to be guessed.
+            mover_disp = (sided(cur["mover"], side_of(cur["mover_pos"]))
                           if cur.get("mover_pos") else cur["mover"])
-            target_disp = (qual_species(cur.get("target"),
-                                        side_of(cur["target_pos"]))
+            target_disp = (sided(cur.get("target"),
+                                 side_of(cur["target_pos"]))
                            if cur.get("target_pos") else cur.get("target"))
             move_name = cur["move"]
             if cur.get("via"):

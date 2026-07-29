@@ -1059,3 +1059,28 @@ def test_backlog_drop_skips_a_line_when_speech_is_behind():
     asyncio.run(c2.speak({"text": "[RESULT] WIN vs X.", "beats": [],
                           "hud": None}))
     assert c2.transcript, "RESULT must still speak when audio is behind"
+
+
+def test_starved_voice_takes_the_lead_back():
+    """Both speech gates cut the LATER voice, and the handoff convention puts
+    the gremlin first — so "drop the second" silently meant "always drop
+    PRISM". Take 22 came out 25 PRISM drops to 4, and 20 FRACTURE lines to 5.
+    After two consecutive drops the starved voice leads."""
+    c = Caster("http://unused", "test-model", expert_url=None)
+    beats = [_beat("gremlin"), _beat("analyst")]
+    assert _speakers(beats, "[BATTLE T5]") == ["FRACTURE", "PRISM"]
+
+    calls = []
+    c._generate_sync = lambda p, i, n=None, t=0.0: (calls.append(p) or "line")
+    c._ungrounded_entity = lambda l, i: None
+
+    c._drops = {"PRISM": 2}          # PRISM cut twice running
+    asyncio.run(c.speak({"text": "[BATTLE T5] x", "beats": beats,
+                         "hud": None}))
+    assert calls[0] == "PRISM", "the starved voice must lead"
+
+    # and speaking clears the starvation, so the order reverts
+    calls.clear()
+    asyncio.run(c.speak({"text": "[BATTLE T6] x", "beats": beats,
+                         "hud": None}))
+    assert calls[0] == "FRACTURE"

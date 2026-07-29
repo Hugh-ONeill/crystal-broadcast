@@ -36,7 +36,7 @@ def test_scanner_ko_attribution_and_side():
     kos = [e for e in evs if e.type == "ko"]
     assert len(kos) == 1
     assert kos[0].side == "us"            # OUR mon went down
-    assert "knocked out Darkrai" in kos[0].prose
+    assert "knocked out our Darkrai" in kos[0].prose
     assert kos[0].data["move"] == "Sucker Punch"
 
 
@@ -119,7 +119,7 @@ def test_mirror_match_ko_when_opponent_active_differs():
     ], role="p2")
     ko = next(e for e in evs if e.type == "ko")
     assert "knocked out our Clefable" in ko.prose      # OURS fell
-    assert "their Toxapex" not in ko.prose             # Toxapex only theirs -> bare
+    assert "their Toxapex" in ko.prose                 # sides are always marked now
 
 
 def test_mirror_residual_faint_disambiguates():
@@ -133,9 +133,15 @@ def test_mirror_residual_faint_disambiguates():
     assert ko.prose == "our Gliscor went down"
 
 
-def test_non_mirror_prose_byte_unchanged():
-    """Different species on each side -> no our/their prefix (the KO/move
-    prose must stay byte-identical to before the mirror fix)."""
+def test_move_prose_marks_the_side_even_without_a_mirror():
+    """Superseded 2026-07-29: this used to pin non-mirror prose as byte-
+    identical, so a move was only side-marked when the same species sat on
+    both rosters. Take 22 showed what that costs — every misattribution in
+    the match was an unmarked move, and the beats FRACTURE got right were
+    exactly the ones a mirror happened to mark ("Iron Valiant's Focus Blast
+    knocked out Kingambit" -> "THEY CLICKED FOCUS BLAST", ours). Whose move
+    it is is the single most invertible fact in a beat, so it is now always
+    stated."""
     sc = ProtocolScanner()
     evs = sc.scan([
         ["", "switch", "p1a: Great Tusk", "Great Tusk", "100/100"],
@@ -145,8 +151,8 @@ def test_non_mirror_prose_byte_unchanged():
         ["", "faint", "p2a: Gholdengo"],
     ], role="p2")
     ko = next(e for e in evs if e.type == "ko")
-    assert ko.prose == "Great Tusk's Earthquake knocked out Gholdengo"
-    assert "our" not in ko.prose and "their" not in ko.prose
+    assert ko.prose == ("their Great Tusk's Earthquake knocked out "
+                        "our Gholdengo")
 
 
 def test_sleep_talk_move_labeled():
@@ -684,7 +690,7 @@ def test_move_hit_names_its_target():
     # the target must sit NEXT TO the verb. Trailing it ("...landed super
     # effective and a devastating blow on Gliscor") still let a caster invert
     # who hit whom, live on 2026-07-28.
-    assert hits[0].prose.startswith("Great Tusk's Ice Spinner hit Gliscor")
+    assert hits[0].prose.startswith("their Great Tusk's Ice Spinner hit our Gliscor")
 
 
 def test_recovery_is_a_beat_and_names_its_source():
@@ -847,7 +853,7 @@ def test_a_miss_names_who_dodged():
         ["", "move", "p1a: Darkrai", "Dark Pulse", "p2a: Kingambit"],
     ], role="p1")
     mm = [e for e in evs if e.type == "move_missed"][0]
-    assert "missed Darkrai" in mm.prose
+    assert "missed our Darkrai" in mm.prose
 
 
 def test_untagged_drop_with_no_known_move_stays_neutral():
