@@ -1074,7 +1074,7 @@ def test_starved_voice_takes_the_lead_back():
     c._generate_sync = lambda p, i, n=None, t=0.0: (calls.append(p) or "line")
     c._ungrounded_entity = lambda l, i: None
 
-    c._drops = {"PRISM": 2}          # PRISM cut twice running
+    c._drops = {"PRISM": c.STARVED_AFTER}   # PRISM cut enough to lead
     asyncio.run(c.speak({"text": "[BATTLE T5] x", "beats": beats,
                          "hud": None}))
     assert calls[0] == "PRISM", "the starved voice must lead"

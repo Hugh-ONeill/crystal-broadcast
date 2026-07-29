@@ -365,6 +365,13 @@ class Caster:
         # consecutive speech drops per persona, so a starved voice can take
         # the lead back (see the rotation in speak())
         self._drops: dict = {}
+        # Consecutive drops before a voice takes the lead back. At 2 the
+        # trailing voice leads once per two drops, i.e. a third of contested
+        # beats — measured 4:11 on take 25, against a 2:1 target. At 1 it
+        # alternates, which is as far as this lever goes; the rest of the
+        # skew is beat MIX (gremlin-only interrupts vs analyst-only reads)
+        # and is by design.
+        self.STARVED_AFTER = 1
         # how many grounded facts ride along on a beat, and how many of those
         # are held back for the two actives' abilities (see _gather_facts).
         # The cap is a latency budget: each fact is an expert round-trip.
@@ -1155,7 +1162,8 @@ class Caster:
         # lead when the trailing voice has been starved, so the cost of a
         # tight budget lands on whoever has been speaking, not on whoever the
         # convention happens to put second.
-        if len(speakers) > 1 and self._drops.get(speakers[-1], 0) >= 2:
+        if (len(speakers) > 1
+                and self._drops.get(speakers[-1], 0) >= self.STARVED_AFTER):
             speakers = list(reversed(speakers))
         deliberating = any(b.get("beat") == "deep_think"
                            for b in item.get("beats") or [])
