@@ -959,6 +959,21 @@ class Caster:
         return "critical" not in (item.get("text") or "").lower()
 
     @staticmethod
+    def _miss_for_immunity(line: str, item: dict) -> bool:
+        """True when the line narrates a no-effect as a miss/dodge — three
+        sightings in one hunt: 'the Thunder Wave missed because of Iron
+        Treads' immunity' (take 52 T24), 'that evasion' for a Ground
+        immunity (take 48 T24). An immunity is the type chart working;
+        a miss is the dice — conflating them corrupts both the luck ledger
+        and the mechanics. Narrow on purpose: fires only when the beat has
+        a no-effect and NO real miss to be talking about."""
+        text = (item.get("text") or "").lower()
+        if "had no effect" not in text or "missed" in text:
+            return False
+        return bool(re.search(r"\b(?:miss(?:ed|es)?|dodg\w+|evad\w+|"
+                              r"evasion|whiff\w*)\b", line, re.I))
+
+    @staticmethod
     def _fabricated_recoil(line: str, item: dict) -> bool:
         """True when the line blames 'recoil' the beat never reported — take
         49 T16/T19: Headlong Rush's self-stat-drops narrated as recoil,
@@ -1574,6 +1589,22 @@ class Caster:
                         "what the beat reports.")
                     retry = _clean(raw)
                     if retry and not self._fabricated_crit(retry, item):
+                        line = retry
+                except Exception:
+                    pass
+            # miss-for-immunity guard: a no-effect narrated as a miss/dodge
+            # corrupts both the luck ledger and the mechanics (3 sightings
+            # in one hunt); regen once with the distinction spelled out
+            if line and self._miss_for_immunity(line, item):
+                try:
+                    raw = await asyncio.to_thread(
+                        self._generate_sync, persona, item,
+                        "Nothing MISSED — the beat says the move had NO "
+                        "EFFECT, which is a type immunity: the type chart, "
+                        "not the dice and not a dodge. Say it was immune or "
+                        "that it did nothing.")
+                    retry = _clean(raw)
+                    if retry and not self._miss_for_immunity(retry, item):
                         line = retry
                 except Exception:
                     pass

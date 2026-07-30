@@ -1377,3 +1377,20 @@ def test_mid_line_self_label_is_stripped():
         "They waited it out! the numbers agree."
     assert _clean("Quit looking at the count, Prism, and watch me work!") == \
         "Quit looking at the count, Prism, and watch me work!"
+
+
+def test_miss_for_immunity_detection():
+    """A no-effect narrated as a miss/dodge (3 sightings in one hunt) — but
+    never fire when the beat contains a REAL miss to talk about."""
+    c = Caster("http://unused", "test-model", expert_url=None)
+    immune = {"text": "[BATTLE T24] their Slowking-Galar's Thunder Wave had "
+                      "no effect on our Iron Treads. X vs Y."}
+    real_miss = {"text": "[BATTLE T20] their Slowking-Galar's Thunder Wave "
+                         "missed our Iron Crown. Thunder Wave had no effect "
+                         "on our Iron Treads earlier."}
+    assert c._miss_for_immunity(
+        "The Thunder Wave missed because of Iron Treads' immunity.", immune)
+    assert c._miss_for_immunity("A clean dodge by Iron Treads!", immune)
+    assert not c._miss_for_immunity(
+        "The Thunder Wave simply has no effect on a Ground type.", immune)
+    assert not c._miss_for_immunity("It missed! The dice again!", real_miss)
