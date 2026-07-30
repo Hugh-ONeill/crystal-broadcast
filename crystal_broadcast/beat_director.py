@@ -614,9 +614,10 @@ class ProtocolScanner:
             if cur and cur.get("move"):
                 # survives the flush so effects whose protocol line follows
                 # the move (Court Change's -swapsideconditions) can name
-                # their user
+                # their user. The TARGET rides along so a faint that arrives
+                # after the move was flushed can still bind its killer.
                 self._last_move = (cur["mover"], cur["move"],
-                                   cur.get("mover_side"))
+                                   cur.get("mover_side"), cur.get("target"))
             if not cur or not cur.get("move"):
                 cur = None
                 return
@@ -896,6 +897,13 @@ class ProtocolScanner:
                 key = sm[2].split(":")[0]
                 prev_species = self._species.get(key)
                 self._hp[key] = (_hp_frac(sm[4]) if len(sm) > 4 else 1.0)
+                # the residual ledger is keyed by SLOT: a new occupant must
+                # not inherit the old one's damage source. Take 48 T30: Iron
+                # Valiant's burn was recorded under p1a, Valiant died, and
+                # eleven turns later Kommo-o's unattributed faint popped the
+                # stale entry — "Kommo-o went down to the burn" on a mon the
+                # protocol shows was NEVER burned. The record itself lied.
+                self._residual.pop(key, None)
                 if len(sm) > 3 and sm[3]:
                     species = sm[3].split(",")[0]
                     self._species[key] = species
@@ -932,12 +940,35 @@ class ProtocolScanner:
                 else:
                     flush()  # residual: poison/hazard/recoil/Life Orb etc.
                     why = self._residual.pop(sm[2].split(":")[0], None)
-                    prose = (f"{qual(sm[2])} went down to the {_RESIDUAL_NAME.get(why, why)}"
-                             if why else f"{qual(sm[2])} went down")
-                    out.append(Event("ko", prose,
-                                     side=side_of(sm[2]), notable=True,
-                                     data={"target": mon, "residual": True,
-                                           "cause": why}))
+                    lm = self._last_move
+                    if (not why and lm and len(lm) > 3 and lm[3] == mon
+                            and lm[0] != mon):
+                        # A KO whose faint arrives AFTER its move was
+                        # flushed: Headlong Rush emits move, damage, TWO
+                        # self-unboosts, faint — and the unboost handler
+                        # flushes. The faint then fell into the residual
+                        # path, airing unattributed ("Iron Treads went
+                        # down", take 28 T14) or worse, popping a stale
+                        # residual (take 48 T30's invented burn). The
+                        # parked last move still knows its target.
+                        who = (sided(lm[0], lm[2])
+                               if len(lm) > 2 and lm[2] else lm[0])
+                        out.append(Event(
+                            "ko",
+                            f"{who}'s {lm[1]} knocked out "
+                            f"{qual_species(mon, side_of(sm[2]))}",
+                            side=side_of(sm[2]), notable=True,
+                            data={"mover": lm[0], "move": lm[1],
+                                  "target": mon}))
+                    else:
+                        prose = (f"{qual(sm[2])} went down to the "
+                                 f"{_RESIDUAL_NAME.get(why, why)}"
+                                 if why else f"{qual(sm[2])} went down")
+                        out.append(Event("ko", prose,
+                                         side=side_of(sm[2]), notable=True,
+                                         data={"target": mon,
+                                               "residual": True,
+                                               "cause": why}))
             elif t == "-status" and len(sm) > 3:
                 tmpl = _STATUS_INFLICT.get(sm[3])
                 if tmpl:

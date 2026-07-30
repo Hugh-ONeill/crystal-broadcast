@@ -1502,3 +1502,50 @@ def test_boost_subject_is_always_side_marked():
                                "with Calm Mind")
     assert boosts[2].prose == ("their Kingambit sharply raised its Attack "
                                "with Swords Dance")
+
+
+# --- take 48 record bugs: stale residual + orphaned KO ----------------------
+
+def test_new_occupant_does_not_inherit_slot_residual():
+    """Take 48 T30, protocol-verified: the ONLY burn all game was Iron
+    Valiant's, yet 'Kommo-o went down to the burn' aired — Valiant's residual
+    sat under p1a and Kommo-o's unattributed faint popped it eleven turns
+    later. The record itself fabricated a cause."""
+    sc = ProtocolScanner()
+    evs = sc.scan([
+        ["", "switch", "p1a: Iron Valiant", "Iron Valiant", "100/100"],
+        ["", "switch", "p2a: Cinderace", "Cinderace", "100/100"],
+        ["", "move", "p2a: Cinderace", "Will-O-Wisp", "p1a: Iron Valiant"],
+        ["", "-status", "p1a: Iron Valiant", "brn"],
+        ["", "-damage", "p1a: Iron Valiant", "88/100 brn", "[from] brn"],
+        ["", "faint", "p1a: Iron Valiant"],
+        ["", "switch", "p1a: Kommo-o", "Kommo-o", "100/100"],
+        ["", "move", "p2a: Cinderace", "Pyro Ball", "p1a: Kommo-o"],
+        ["", "-damage", "p1a: Kommo-o", "10/100"],
+        ["", "-damage", "p1a: Kommo-o", "0 fnt"],
+        ["", "faint", "p1a: Kommo-o"],
+    ], role="p1")
+    kos = [e for e in evs if e.type == "ko" and e.data.get("target") == "Kommo-o"]
+    assert kos
+    assert "burn" not in kos[0].prose
+
+
+def test_ko_binds_when_self_effects_flush_the_move():
+    """Headlong Rush: move, damage, TWO self-unboosts (which flush), faint.
+    The KO used to fall unattributed into the residual path ('Iron Treads
+    went down', take 28 T14) — the parked last move still knows its target."""
+    sc = ProtocolScanner()
+    evs = sc.scan([
+        ["", "switch", "p1a: Kommo-o", "Kommo-o", "100/100"],
+        ["", "switch", "p2a: Great Tusk", "Great Tusk", "100/100"],
+        ["", "move", "p2a: Great Tusk", "Headlong Rush", "p1a: Kommo-o"],
+        ["", "-damage", "p1a: Kommo-o", "0 fnt"],
+        ["", "-unboost", "p2a: Great Tusk", "def", "1"],
+        ["", "-unboost", "p2a: Great Tusk", "spd", "1"],
+        ["", "faint", "p1a: Kommo-o"],
+    ], role="p1")
+    kos = [e for e in evs if e.type == "ko"]
+    assert kos
+    assert kos[0].prose == ("their Great Tusk's Headlong Rush knocked out "
+                            "Kommo-o")
+    assert kos[0].data["move"] == "Headlong Rush"
