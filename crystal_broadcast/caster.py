@@ -833,6 +833,23 @@ class Caster:
                           "its result is NOT known yet. Do not say whether it "
                           "hit, missed, knocked out, or worked — react to the "
                           "decision and the position instead.")
+        elif "We go for" in (item.get("text") or ""):
+            # the exchange-less gate above missed beats that carry BOTH a
+            # resolved exchange and a chosen move: take 28 T28 "The Sucker
+            # Punch connects" and take 30 T8 "I absolutely crushed them with
+            # it" were outcomes narrated for the 'We go for' move
+            direction += (" The 'We go for' move is our NEXT play — it has "
+                          "not happened yet. Say nothing about its outcome.")
+        if " failed" in (item.get("text") or ""):
+            # the move_failed narration states THAT it failed; the WHY is
+            # mechanics, and inventing it produced "the Sucker Punch failed
+            # because Kingambit couldn't bypass that Tera Ghost flip" (take
+            # 30 T5 — wrong mon, wrong mechanic, and Dark hits Ghost anyway)
+            direction += (" A move FAILED this exchange. Fails have "
+                          "mechanical causes (a Sucker Punch fails when the "
+                          "target is not attacking). Do not invent a reason "
+                          "— state the fail plainly, or explain it only from "
+                          "a listed grounded fact.")
         direction += (" One or two short spoken sentences, react now. "
                       "Output only the line itself.")
         if nudge:
@@ -854,11 +871,17 @@ class Caster:
                      "that blocked it (Levitate, Volt Absorb, Flash Fire) — "
                      "credit an ability for an immunity ONLY when the beat "
                      "names it, never otherwise, even for an ability listed "
-                     "below. Use these facts to add meaning to what DID happen "
-                     "— why a mon survived, why a status is actually a boon — "
-                     "never to invent a reason a move failed. Context, not a "
-                     "mandate: reach for them only when they explain the "
-                     f"moment, not every line:\n{lines}\n\n")
+                     "below. (3) A fact's example Pokemon and moves come from "
+                     "the corpus, NOT this game — apply the fact's REASONING "
+                     "to what is actually on the field, and never name a "
+                     "corpus example as if it were in play (a fact citing "
+                     "'Body Press Corviknight' grounds a Tera read, but the "
+                     "Fighting move to name is the one THIS opponent has "
+                     "shown). Use these facts to add meaning to what DID "
+                     "happen — why a mon survived, why a status is actually "
+                     "a boon — never to invent a reason a move failed. "
+                     "Context, not a mandate: reach for them only when they "
+                     f"explain the moment, not every line:\n{lines}\n\n")
         # FRACTURE's Book of Grudges: inject the real vendetta for the mon
         # on the field so she can cite it. Only a recorded grudge appears
         # here, which is the whole point — her paranoia has to be earned,
