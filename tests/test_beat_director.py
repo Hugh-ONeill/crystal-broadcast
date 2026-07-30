@@ -1166,3 +1166,157 @@ def test_spin_only_clears_the_users_own_side():
         ["", "move", "p1a: Iron Treads", "Rapid Spin", "p2a: Zapdos"],
     ], role="p1")
     assert [e for e in evs if e.type == "spin_no_hazards"]
+
+
+# --- actor attribution sweep (2026-07-29, after take 27's Substitute bug) ---
+# Passive, causeless prose is the caster's invitation to invent the actor —
+# the class behind the hazard-clear, Trick, Knock Off and Substitute bugs.
+# These pin every construction the sweep converted to name its actor, plus
+# the fallbacks that must STAY passive when no cause is on record.
+
+def test_sub_break_names_the_breaker():
+    """Take 27 T6: 'Kommo-o's Substitute broke' (no actor) became PRISM
+    crediting our not-yet-thrown Shadow Claw with breaking our OWN sub."""
+    sc = ProtocolScanner()
+    evs = sc.scan([
+        ["", "switch", "p1a: Kommo-o", "Kommo-o", "100/100"],
+        ["", "switch", "p2a: Kingambit", "Kingambit", "100/100"],
+        ["", "move", "p2a: Kingambit", "Iron Head", "p1a: Kommo-o"],
+        ["", "-end", "p1a: Kommo-o", "Substitute"],
+    ], role="p1")
+    ends = [e for e in evs if e.type == "volatile_end"]
+    assert ends
+    assert ends[0].prose == ("their Kingambit's Iron Head broke "
+                             "Kommo-o's Substitute")
+    assert ends[0].data["breaker"] == "Kingambit"
+
+
+def test_sub_break_without_a_cause_stays_passive():
+    sc = ProtocolScanner()
+    evs = sc.scan([
+        ["", "switch", "p1a: Kommo-o", "Kommo-o", "100/100"],
+        ["", "-end", "p1a: Kommo-o", "Substitute"],
+    ], role="p1")
+    ends = [e for e in evs if e.type == "volatile_end"]
+    assert ends and ends[0].prose == "Kommo-o's Substitute broke"
+
+
+def test_volatile_starts_name_the_inflictor():
+    cases = [
+        ("Encore", "Encore", "their Grimmsnarl locked Kyurem in with Encore"),
+        ("Taunt", "Taunt", "their Grimmsnarl shut Kyurem down with Taunt"),
+        ("Leech Seed", "move: Leech Seed",
+         "their Grimmsnarl planted Leech Seed into Kyurem"),
+        ("Yawn", "move: Yawn",
+         "their Grimmsnarl's Yawn is making Kyurem drowsy"),
+        ("Attract", "Attract",
+         "their Grimmsnarl left Kyurem infatuated with Attract"),
+    ]
+    for move, cond, want in cases:
+        sc = ProtocolScanner()
+        evs = sc.scan([
+            ["", "switch", "p1a: Kyurem", "Kyurem", "100/100"],
+            ["", "switch", "p2a: Grimmsnarl", "Grimmsnarl", "100/100"],
+            ["", "move", "p2a: Grimmsnarl", move, "p1a: Kyurem"],
+            ["", "-start", "p1a: Kyurem", cond],
+        ], role="p1")
+        starts = [e for e in evs if e.type == "volatile_start"]
+        assert starts and starts[0].prose == want, (move, starts)
+        assert starts[0].data["user"] == "Grimmsnarl"
+
+
+def test_disable_names_the_disabled_move():
+    sc = ProtocolScanner()
+    evs = sc.scan([
+        ["", "switch", "p1a: Kyurem", "Kyurem", "100/100"],
+        ["", "switch", "p2a: Gengar", "Gengar", "100/100"],
+        ["", "move", "p2a: Gengar", "Disable", "p1a: Kyurem"],
+        ["", "-start", "p1a: Kyurem", "Disable", "Freeze-Dry"],
+    ], role="p1")
+    starts = [e for e in evs if e.type == "volatile_start"]
+    assert starts
+    assert starts[0].prose == "their Gengar disabled Kyurem's Freeze-Dry"
+
+
+def test_confusion_from_fatigue_is_self_inflicted():
+    """Outrage fatigue: passive 'became confused' lets a caster hand the
+    opponent credit for something the mon did to itself."""
+    sc = ProtocolScanner()
+    evs = sc.scan([
+        ["", "switch", "p1a: Kyurem", "Kyurem", "100/100"],
+        ["", "-start", "p1a: Kyurem", "confusion", "[fatigue]"],
+    ], role="p1")
+    starts = [e for e in evs if e.type == "volatile_start"]
+    assert starts
+    assert starts[0].prose == "Kyurem wore itself out into confusion"
+    assert starts[0].data["cause"] == "fatigue"
+
+
+def test_confusion_from_a_known_confuser_names_it():
+    sc = ProtocolScanner()
+    evs = sc.scan([
+        ["", "switch", "p1a: Kyurem", "Kyurem", "100/100"],
+        ["", "switch", "p2a: Gengar", "Gengar", "100/100"],
+        ["", "move", "p2a: Gengar", "Confuse Ray", "p1a: Kyurem"],
+        ["", "-start", "p1a: Kyurem", "confusion"],
+    ], role="p1")
+    starts = [e for e in evs if e.type == "volatile_start"]
+    assert starts
+    assert starts[0].prose == "their Gengar's Confuse Ray left Kyurem confused"
+
+
+def test_ability_caused_volatile_stays_passive():
+    """Cute Charm: the -start lands on the ATTACKER right after its own
+    contact move, so lm is the victim's own move and must NOT bind — the
+    Flame Body lesson says ability procs keep the passive voice."""
+    sc = ProtocolScanner()
+    evs = sc.scan([
+        ["", "switch", "p1a: Kyurem", "Kyurem", "100/100"],
+        ["", "switch", "p2a: Enamorus", "Enamorus", "100/100"],
+        ["", "move", "p1a: Kyurem", "Icicle Spear", "p2a: Enamorus"],
+        ["", "-start", "p1a: Kyurem", "Attract",
+         "[from] ability: Cute Charm", "[of] p2a: Enamorus"],
+    ], role="p1")
+    starts = [e for e in evs if e.type == "volatile_start"]
+    assert starts and starts[0].prose == "Kyurem became infatuated"
+
+
+def test_haze_names_its_user():
+    sc = ProtocolScanner()
+    evs = sc.scan([
+        ["", "switch", "p1a: Kyurem", "Kyurem", "100/100"],
+        ["", "switch", "p2a: Toxapex", "Toxapex", "100/100"],
+        ["", "move", "p2a: Toxapex", "Haze"],
+        ["", "-clearallboost"],
+    ], role="p1")
+    clears = [e for e in evs if e.type == "boosts_cleared"]
+    assert clears
+    assert clears[0].prose == ("their Toxapex's Haze wiped away "
+                               "every stat change")
+
+
+def test_clear_smog_names_user_and_victim():
+    sc = ProtocolScanner()
+    evs = sc.scan([
+        ["", "switch", "p1a: Kyurem", "Kyurem", "100/100"],
+        ["", "switch", "p2a: Toxapex", "Toxapex", "100/100"],
+        ["", "move", "p2a: Toxapex", "Clear Smog", "p1a: Kyurem"],
+        ["", "-damage", "p1a: Kyurem", "88/100"],
+        ["", "-clearboost", "p1a: Kyurem"],
+    ], role="p1")
+    clears = [e for e in evs if e.type == "boosts_cleared"]
+    assert clears
+    assert clears[0].prose == ("their Toxapex's Clear Smog cleared "
+                               "Kyurem's boosts")
+
+
+def test_tailwind_names_the_setter():
+    sc = ProtocolScanner()
+    evs = sc.scan([
+        ["", "switch", "p1a: Zapdos", "Zapdos", "100/100"],
+        ["", "move", "p1a: Zapdos", "Tailwind"],
+        ["", "-sidestart", "p1: wiz", "move: Tailwind"],
+    ], role="p1")
+    tw = [e for e in evs if e.type == "tailwind_up"]
+    assert tw
+    assert tw[0].prose == "our Zapdos set Tailwind for our side"

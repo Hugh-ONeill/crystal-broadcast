@@ -414,6 +414,25 @@ _VOL_START = {
 _VOL_END = {
     "substitute": ("{n}'s Substitute broke", True),
 }
+# volatile -> (causing moves, active template). The _VOL_START prose above is
+# passive, and passives are the caster's invitation to invent the actor (the
+# hazard-clear/Substitute lesson, found one screen-watch at a time). Every one
+# of these conditions is something somebody DID, and its -start line directly
+# follows the causing |move| line, so self._last_move names the actor — bind
+# on an EXACT move match (the Knock Off discipline: no guess, no
+# misattribution; an unlisted cause keeps the passive fallback, which is also
+# the correct voice for ability procs per the Flame Body lesson).
+_VOL_INFLICT = {
+    "leech seed": ({"leech seed"}, "{who} planted Leech Seed into {n}"),
+    "confusion": ({"confuse ray", "swagger", "flatter", "dynamic punch",
+                   "hurricane", "water pulse", "dizzy punch", "chatter"},
+                  "{who}'s {move} left {n} confused"),
+    "encore": ({"encore"}, "{who} locked {n} in with Encore"),
+    "taunt": ({"taunt"}, "{who} shut {n} down with Taunt"),
+    "yawn": ({"yawn"}, "{who}'s Yawn is making {n} drowsy"),
+    "disable": ({"disable"}, "{who} disabled {n}'s {mv}"),
+    "attract": ({"attract"}, "{who} left {n} infatuated with Attract"),
+}
 
 
 def _trick_event(by: str, first, second, last_move) -> Event:
@@ -1064,37 +1083,101 @@ class ProtocolScanner:
                           "maxed": True}))
             elif t in ("-clearallboost", "-invertboost", "-clearboost"):
                 flush()
+                # Name the actor: Haze / Clear Smog / Topsy-Turvy are plays
+                # somebody MADE, and the protocol line follows the causing
+                # |move| line (the Substitute-break ordering fact). Passive
+                # "were cleared" is the same invitation the sub break and the
+                # hazard clears extended. lm binds generically here — in
+                # gen9 singles these three lines are de facto move-caused.
+                lm = self._last_move
+                target = name_of(sm[2]) if len(sm) > 2 else None
+                actor = None
+                if lm and lm[0] != target:
+                    actor = (sided(lm[0], lm[2])
+                             if len(lm) > 2 and lm[2] else lm[0])
                 if t == "-clearallboost":
-                    prose = "every stat change was wiped away"
+                    prose = (f"{actor}'s {lm[1]} wiped away every stat change"
+                             if actor else "every stat change was wiped away")
                 elif t == "-invertboost":
-                    prose = (f"{qual(sm[2])}'s stat changes were inverted"
-                             if len(sm) > 2 else
-                             "the stat changes were inverted")
+                    tq = qual(sm[2]) if len(sm) > 2 else None
+                    if actor and tq:
+                        prose = (f"{actor}'s {lm[1]} flipped {tq}'s "
+                                 f"stat changes upside down")
+                    elif tq:
+                        prose = f"{tq}'s stat changes were inverted"
+                    else:
+                        prose = "the stat changes were inverted"
                 else:
-                    prose = (f"{qual(sm[2])}'s boosts were cleared"
-                             if len(sm) > 2 else "the boosts were cleared")
+                    tq = qual(sm[2]) if len(sm) > 2 else None
+                    if actor and tq:
+                        prose = f"{actor}'s {lm[1]} cleared {tq}'s boosts"
+                    elif tq:
+                        prose = f"{tq}'s boosts were cleared"
+                    else:
+                        prose = "the boosts were cleared"
                 out.append(Event("boosts_cleared", prose, notable=True,
-                                 side=side_of(sm[2]) if len(sm) > 2 else None))
+                                 side=side_of(sm[2]) if len(sm) > 2 else None,
+                                 data={"user": lm[0]} if actor else {}))
             elif t == "-start" and len(sm) > 3:
                 key = _cond_name(sm[3]).lower()
                 entry = _VOL_START.get(key)
                 if entry:
                     flush()
+                    n = qual(sm[2])
+                    prose = entry[0].format(n=n)
+                    data = {"mon": name_of(sm[2]), "volatile": key}
+                    lm = self._last_move
+                    infl = _VOL_INFLICT.get(key)
+                    if (key == "confusion"
+                            and any("[fatigue]" in a for a in sm[4:])):
+                        # Outrage-class fatigue: SELF-inflicted, and the
+                        # passive "became confused" would let a caster hand
+                        # the opponent credit for it
+                        prose = f"{n} wore itself out into confusion"
+                        data["cause"] = "fatigue"
+                    elif (infl and lm and lm[1].lower() in infl[0]
+                            and lm[0] != name_of(sm[2])):
+                        who = (sided(lm[0], lm[2])
+                               if len(lm) > 2 and lm[2] else lm[0])
+                        # Disable's protocol line carries WHICH move ([-start
+                        # ...|Disable|Slam]) — say it, or the caster guesses
+                        mv = (sm[4] if key == "disable" and len(sm) > 4
+                              and not sm[4].startswith("[") else "last move")
+                        prose = infl[1].format(who=who, n=n,
+                                               move=lm[1], mv=mv)
+                        data["user"] = lm[0]
                     out.append(Event(
-                        "volatile_start",
-                        entry[0].format(n=qual(sm[2])),
+                        "volatile_start", prose,
                         side=side_of(sm[2]), notable=entry[1],
-                        data={"mon": name_of(sm[2]), "volatile": key}))
+                        data=data))
             elif t == "-end" and len(sm) > 3:
                 entry = _VOL_END.get(_cond_name(sm[3]).lower())
                 if entry:
                     flush()
+                    vol = _cond_name(sm[3]).lower()
+                    prose = entry[0].format(n=qual(sm[2]))
+                    data = {"mon": name_of(sm[2]), "volatile": vol}
+                    # Name the breaker. "Kommo-o's Substitute broke" is the
+                    # same causeless passive as the old hazard-clear prose,
+                    # and it invites the same invention: take 27 T6, PRISM
+                    # credited our not-yet-thrown Shadow Claw with breaking
+                    # our OWN Substitute. The |-end| follows the attacker's
+                    # |move| line, and flush() just parked that move in
+                    # self._last_move (the Court Change pattern), so the
+                    # actor is sitting right there.
+                    if vol == "substitute":
+                        lm = self._last_move
+                        if lm and lm[0] != name_of(sm[2]):
+                            breaker = (sided(lm[0], lm[2])
+                                       if len(lm) > 2 and lm[2] else lm[0])
+                            prose = (f"{breaker}'s {lm[1]} broke "
+                                     f"{qual(sm[2])}'s Substitute")
+                            data["breaker"] = lm[0]
+                            data["move"] = lm[1]
                     out.append(Event(
-                        "volatile_end",
-                        entry[0].format(n=qual(sm[2])),
+                        "volatile_end", prose,
                         side=side_of(sm[2]), notable=entry[1],
-                        data={"mon": name_of(sm[2]),
-                              "volatile": _cond_name(sm[3]).lower()}))
+                        data=data))
             elif t == "replace" and len(sm) > 2:
                 flush()
                 species = sm[3].split(",")[0] if len(sm) > 3 else name_of(sm[2])
@@ -1144,10 +1227,20 @@ class ProtocolScanner:
                         side=side_of(sm[2]),
                         data={"condition": cond, "user": who}))
                 elif low == "tailwind":
+                    # name the setter like the hazard/screen branches above
+                    lm = self._last_move
+                    setter = (lm[0] if lm and lm[1].lower() == "tailwind"
+                              else None)
+                    setter_disp = (sided(setter, lm[2])
+                                   if setter and len(lm) > 2 and lm[2]
+                                   else setter)
+                    prose = (f"{setter_disp} set Tailwind for {poss} side"
+                             if setter
+                             else f"Tailwind kicked in for {poss} side")
                     out.append(Event(
-                        "tailwind_up", f"Tailwind kicked in for {poss} side",
+                        "tailwind_up", prose,
                         side=side_of(sm[2]),
-                        data={"condition": cond}))
+                        data={"condition": cond, "user": setter}))
             elif t == "-sideend" and len(sm) > 3:
                 flush()
                 poss = side_poss(sm[2])
