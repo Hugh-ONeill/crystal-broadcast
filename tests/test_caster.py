@@ -1299,3 +1299,19 @@ def test_consult_cache_keys_on_the_question():
                                     "Iron Treads in competitive Pokemon")
     assert got[0] == "cached"
     assert c._fact_stats["cache_hit"] == 1
+
+
+def test_stolen_call_survives_her_intensifiers():
+    """Live escape on take 29, her FIRST line of the match: 'I absolutely
+    called that Icicle Spear would clean them up' — the adjacent-only regex
+    missed the adverb, and intensifiers are her whole register."""
+    c = Caster("http://unused", "test-model", expert_url=None)
+    c._match_lines = {"FRACTURE": []}
+    line = ("KINGAMBIT IS GONE! I absolutely called that Icicle Spear "
+            "would clean them up, even if it was resisted!")
+    assert c._stolen_call(line, "FRACTURE") == "Icicle Spear"
+    # denial is not a claim
+    assert c._stolen_call(
+        "I never said Icicle Spear was the play!", "FRACTURE") is None
+    assert c._stolen_call(
+        "I didn't call that Icicle Spear, but WOW!", "FRACTURE") is None

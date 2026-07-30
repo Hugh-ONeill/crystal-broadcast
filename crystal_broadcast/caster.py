@@ -961,9 +961,15 @@ class Caster:
                 return name
         return None
 
+    # Up to two words may sit between "I" and the claim verb: FRACTURE
+    # speaks in intensifiers by contract, and "I absolutely called that
+    # Icicle Spear would clean them up" sailed past the adjacent-only form
+    # live on take 29 — her first line of the match. Negated sentences
+    # ("I never said...") are excluded in _stolen_call, not here.
     _CLAIM_RE = re.compile(
-        r"\b(?:i\s+(?:told\s+you|said|called\s+(?:it|that|this)|"
-        r"promised(?:\s+you)?)|like\s+i\s+(?:said|told\s+you)|"
+        r"\b(?:i\s+(?:\w+(?:'\w+)?\s+){0,2}?(?:told\s+you|said|"
+        r"called\s+(?:it|that|this)|promised(?:\s+you)?)|"
+        r"like\s+i\s+(?:said|told\s+you)|"
         r"i(?:'ve|\s+have)\s+been\s+saying)\b", re.I)
 
     def _stolen_call(self, line: str, persona: str) -> str | None:
@@ -993,7 +999,10 @@ class Caster:
             return None
         claim_text = " ".join(
             s for s in re.split(r"(?<=[.!?])\s+", line)
-            if self._CLAIM_RE.search(s))
+            if self._CLAIM_RE.search(s)
+            # a denial is not a claim: the loosened regex would otherwise
+            # read "I never said X" as claiming X
+            and not re.search(r"\b(?:never|not)\b|n't\b", s, re.I))
         prior = " ".join(self._match_lines.get(persona, ())).lower()
         caps_blind = claim_text.isupper()
         claim_low = claim_text.lower()
