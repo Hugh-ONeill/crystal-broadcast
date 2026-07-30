@@ -1346,3 +1346,21 @@ def test_prompt_fences_cover_switches_and_ability_procs():
              "hud": None}
     msgs2 = c._prompt("FRACTURE", item2)
     assert "NOBODY clicked it" in msgs2[1]["content"]
+
+
+def test_fabricated_recoil_detection():
+    """Take 49: Headlong Rush's self-stat-drops narrated as 'recoil', twice.
+    Recoil claimed without beat support is invented; real recoil (Life Orb,
+    Flare Blitz — the beat says so) passes."""
+    c = Caster("http://unused", "test-model", expert_url=None)
+    no_recoil = {"text": "[BATTLE T16] their Great Tusk's Headlong Rush hit "
+                         "our Kingambit — a devastating blow; their Great "
+                         "Tusk dropped its own Defense using Headlong Rush."}
+    real_recoil = {"text": "[BATTLE T4] Dragonite went down to the Life Orb "
+                           "recoil. X vs Y."}
+    assert c._fabricated_recoil(
+        "If Great Tusk survives the recoil of that Headlong Rush, we have "
+        "a window.", no_recoil)
+    assert not c._fabricated_recoil(
+        "The recoil finally caught up with it.", real_recoil)
+    assert not c._fabricated_recoil("A devastating blow!", no_recoil)

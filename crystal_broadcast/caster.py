@@ -947,6 +947,16 @@ class Caster:
             return False
         return "critical" not in (item.get("text") or "").lower()
 
+    @staticmethod
+    def _fabricated_recoil(line: str, item: dict) -> bool:
+        """True when the line blames 'recoil' the beat never reported — take
+        49 T16/T19: Headlong Rush's self-stat-drops narrated as recoil,
+        twice, with the real effect stated in the beat both times. Same
+        shape as _fabricated_crit: an event word with no beat support."""
+        if not re.search(r"\brecoil\b", line, re.I):
+            return False
+        return "recoil" not in (item.get("text") or "").lower()
+
     def _ungrounded_entity(self, line: str, item: dict) -> str | None:
         """The species/move a line names must be in evidence. Returns the
         offending name, or None.
@@ -1553,6 +1563,22 @@ class Caster:
                         "what the beat reports.")
                     retry = _sanitize(_SELF_LABEL.sub("", raw.strip()))
                     if retry and not self._fabricated_crit(retry, item):
+                        line = retry
+                except Exception:
+                    pass
+            # fabricated-recoil guard: take 49 T16/T19, PRISM blamed
+            # "recoil" for Headlong Rush twice — it has none, it drops the
+            # user's defenses, and the beat stated the real effect both
+            # times. Same facts-of-record shape as the crit guard above.
+            if line and self._fabricated_recoil(line, item):
+                try:
+                    raw = await asyncio.to_thread(
+                        self._generate_sync, persona, item,
+                        "Do NOT mention recoil — nothing in the beat reports "
+                        "recoil damage. The beat states the move's real "
+                        "effects; use those.")
+                    retry = _sanitize(_SELF_LABEL.sub("", raw.strip()))
+                    if retry and not self._fabricated_recoil(retry, item):
                         line = retry
                 except Exception:
                     pass
