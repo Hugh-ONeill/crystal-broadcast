@@ -377,6 +377,9 @@ class Caster:
         # spoken-line gap at which the trailing voice takes the lead on dual
         # beats (lead speaks unconditionally, so leading = speaking)
         self.DEFICIT_SWAP = 3
+        # (us, them) actives from the last beat, for the switch consult —
+        # a changed pair means a fresh matchup worth asking the expert about
+        self._last_actives: tuple | None = None
         # Consecutive drops before a voice takes the lead back. MEASURED at
         # 2 over two full takes: 1.6:1 and 1.3:1 gremlin-to-analyst, against a
         # 2:1 ideal and 3:1 acceptable — so 2 already lands slightly MORE
@@ -516,22 +519,27 @@ class Caster:
         except Exception as e:
             print(f"caster: warm-cache failed: {e!r}", flush=True)
 
-    def _retrieve_fact(self, name: str, warm: bool = False):
+    def _retrieve_fact(self, name: str, warm: bool = False,
+                       question: str | None = None):
         """Pull a mechanic's real effect from the expert (/retrieve) ->
         (fact_text, citation) or None. citation = {'label','corpus'} for the
         on-screen source chip. Cached (mechanics are static); a down/absent
         expert degrades to None so PRISM reasons as before — never raises.
         `warm=True` marks a team-preview pre-fetch: it fills the cache but is
         kept out of the in-game counters, so 'cold_fetch' measures only the
-        round-trips warming failed to pre-empt."""
-        if name in self._fact_cache:
+        round-trips warming failed to pre-empt.
+        `question` overrides the definitional template — the strategy
+        consults ask 'why', not 'what' (see _strategy_consults). The cache
+        keys on the QUESTION, so a mon's tera consult and its switch consult
+        cache separately; `name` stays the citation-match label either way."""
+        q = question or f"what does {name} do in Pokemon"
+        if q in self._fact_cache:
             if not warm:
                 self._fact_stats["cache_hit"] += 1
-            return self._fact_cache[name]
+            return self._fact_cache[q]
         result = None
         try:
-            body = json.dumps(
-                {"question": f"what does {name} do in Pokemon"}).encode()
+            body = json.dumps({"question": q}).encode()
             req = urllib.request.Request(
                 f"{self.expert_url}/retrieve", data=body,
                 headers={"Content-Type": "application/json"})
@@ -551,7 +559,7 @@ class Caster:
                                           (top.get("corpus") or "").title())
                 result = (" | ".join(texts),
                           {"label": title, "corpus": corpus})
-                self._fact_cache[name] = result   # cache successes only
+                self._fact_cache[q] = result   # cache successes only
         except Exception:
             result = None
         # warm successes are tallied by _warm_cache; keep them out of the
@@ -562,15 +570,24 @@ class Caster:
             self._fact_stats["miss"] += 1
         return result
 
-    def _gather_facts(self, beat_text: str, abilities=()) -> list:
+    def _gather_facts(self, beat_text: str, abilities=(),
+                      consults=()) -> list:
         """(name, fact_text, citation) for each curated mechanic named in the
         beat PLUS the two active mons' abilities (already resolved upstream to
         single-known values), capped so prompt and latency stay bounded.
         Injecting the active abilities is the fix for PRISM reasoning from a
         NAME the beat didn't state — blaming Good as Gold for a Ghost's
-        spinblock. Worker-thread only."""
+        spinblock. `consults` are (label, question) strategy pulls from
+        _strategy_consults; ONE leads the list per beat (it is the beat's
+        point — a tera or a fresh matchup), the definitional facts fill what
+        the cap leaves. Worker-thread only."""
         if not self.expert_url:
             return []
+        facts = []
+        for cname, cq in list(consults)[:1]:   # one strategy pull per beat
+            got = self._retrieve_fact(cname, question=cq)
+            if got:
+                facts.append((cname, got[0], got[1]))
         low = beat_text.lower()
         # what's happening THIS turn leads; abilities ride along as context
         beat_hits = [m for m in _MECHANICS if m in low]
@@ -587,10 +604,10 @@ class Caster:
         # three of them dropped BOTH active abilities — exactly the busy turn
         # where knowing the mon has Unburden or Poison Heal explains the moment.
         # Abilities still fill spare room when the beat names little.
-        n_ability = min(len(ability_hits), self.FACT_ABILITY_SLOTS)
-        picked = beat_hits[:self.FACT_CAP - n_ability]
-        picked += ability_hits[:self.FACT_CAP - len(picked)]
-        facts = []
+        cap = self.FACT_CAP - len(facts)
+        n_ability = min(len(ability_hits), self.FACT_ABILITY_SLOTS, cap)
+        picked = beat_hits[:cap - n_ability]
+        picked += ability_hits[:cap - len(picked)]
         for name in picked:
             got = self._retrieve_fact(name)
             if got:
@@ -599,6 +616,49 @@ class Caster:
             self._fact_stats["injected"] += len(facts)
             self._fact_stats["beats_with_facts"] += 1
         return facts
+
+    def _strategy_consults(self, item) -> list:
+        """(label, question) strategy pulls for this beat — the first PULL
+        instance of the expert integration (user-requested): the definitional
+        template answers 'what does X do', these ask WHY a play makes sense,
+        which is what the Smogon set-analysis corpus actually holds.
+
+          tera    'why does {mon} run Tera {type}' — the 2-entity retrievable
+                  form; the in-game 'against Z' application stays PRISM's own
+                  reasoning, now anchored to the set's stated purpose.
+          switch  a fresh matchup (one active changed, the other stayed) asks
+                  why the incoming mon is a good switch-in against the one it
+                  came in on — Checks-and-Counters territory.
+
+        Board state stays the director's: these questions carry meta
+        knowledge only, per the scope limit on the pull-based TODO item.
+        Updates the last-actives tracker, so call it exactly once per beat.
+        Latency: one consult per beat survives _gather_facts' cap, runs
+        pre-generation off the event loop, and caches on the question — a
+        repeat matchup is a cache hit."""
+        out = []
+        for b in item.get("beats") or []:
+            if b.get("beat") == "tera":
+                d = b.get("data") or {}
+                mon, tt = d.get("mon"), d.get("tera_type")
+                if mon and tt:
+                    out.append((mon, f"why does {mon} run Tera {tt} in "
+                                     f"competitive Pokemon"))
+        hud = item.get("hud") or {}
+        us, them = hud.get("us"), hud.get("them")
+        if us and them:
+            prev = self._last_actives
+            self._last_actives = (us, them)
+            if prev and prev != (us, them):
+                if us != prev[0] and them == prev[1]:
+                    out.append((us, f"why is {us} a good switch-in against "
+                                    f"{them} in competitive Pokemon"))
+                elif them != prev[1] and us == prev[0]:
+                    out.append((them, f"why is {them} a good switch-in "
+                                      f"against {us} in competitive Pokemon"))
+                # both changed at once (double replacement): no single
+                # incoming mon to ask about — skip rather than guess
+        return out
 
     # --- intake (beat-protocol server) ---------------------------------
     async def handle(self, ws):
@@ -634,6 +694,7 @@ class Caster:
                         self._reset_pace_stats()
                         self._spoken = {}
                         self._match_lines = {}
+                        self._last_actives = None
                         blob = data.get("preview_text")
                         if blob and self.expert_url:
                             self._warm_task = asyncio.create_task(
@@ -1280,7 +1341,8 @@ class Caster:
             abilities = [hud.get("us_ability"), hud.get("them_ability")]
             item["_facts"] = await asyncio.to_thread(
                 self._gather_facts, item["text"],
-                [a for a in abilities if a])
+                [a for a in abilities if a],
+                self._strategy_consults(item))
         for idx, persona in enumerate(speakers):
             # Dual-beat pre-flight: a handoff pair is two utterances back to
             # back, so it can outlast the beat floor and push every later beat

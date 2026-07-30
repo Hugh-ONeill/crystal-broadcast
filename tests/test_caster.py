@@ -1227,3 +1227,75 @@ def test_deficit_swap_is_speech_mode_only():
             "hud": None}
     asyncio.run(c.speak(item))
     assert order[0] == "FRACTURE"
+
+
+# --- strategy consults: the pull half of the expert integration ------------
+
+def test_tera_beat_asks_why_that_tera():
+    c = Caster("http://unused", "test-model", expert_url="http://x")
+    item = {"text": "[BATTLE T6] Kingambit Terastallized into a Ghost type.",
+            "beats": [{"beat": "tera", "persona": "analyst",
+                       "data": {"mon": "Kingambit", "tera_type": "Ghost"}}],
+            "hud": None}
+    consults = c._strategy_consults(item)
+    assert consults == [("Kingambit",
+                         "why does Kingambit run Tera Ghost in "
+                         "competitive Pokemon")]
+
+
+def test_switch_consult_fires_on_a_fresh_matchup():
+    c = Caster("http://unused", "test-model", expert_url="http://x")
+    base = {"text": "x", "beats": []}
+    # first beat establishes the baseline — no consult yet
+    assert c._strategy_consults(
+        {**base, "hud": {"us": "Kyurem", "them": "Kingambit"}}) == []
+    # our switch: ask why the incoming mon likes this matchup
+    got = c._strategy_consults(
+        {**base, "hud": {"us": "Iron Treads", "them": "Kingambit"}})
+    assert got == [("Iron Treads",
+                    "why is Iron Treads a good switch-in against "
+                    "Kingambit in competitive Pokemon")]
+    # their switch: same question from the other seat
+    got = c._strategy_consults(
+        {**base, "hud": {"us": "Iron Treads", "them": "Zapdos"}})
+    assert got == [("Zapdos",
+                    "why is Zapdos a good switch-in against "
+                    "Iron Treads in competitive Pokemon")]
+    # unchanged pair -> nothing; double replacement -> nothing to bind
+    assert c._strategy_consults(
+        {**base, "hud": {"us": "Iron Treads", "them": "Zapdos"}}) == []
+    assert c._strategy_consults(
+        {**base, "hud": {"us": "Kyurem", "them": "Cinderace"}}) == []
+
+
+def test_consults_lead_but_share_the_fact_cap():
+    c = Caster("http://unused", "test-model", expert_url="http://x")
+    asked = []
+
+    def fake_retrieve(name, warm=False, question=None):
+        asked.append(question or f"what does {name} do in Pokemon")
+        return ("fact text", {"label": name, "corpus": "Smogon"})
+
+    c._retrieve_fact = fake_retrieve
+    facts = c._gather_facts(
+        "knock off into trick as rapid spin comes out",   # 3 mechanics
+        abilities=["goodasgold"],
+        consults=[("Zapdos", "why is Zapdos a good switch-in against "
+                             "Iron Treads in competitive Pokemon")])
+    assert len(facts) == c.FACT_CAP                 # cap holds
+    assert facts[0][0] == "Zapdos"                  # consult leads
+    assert asked[0].startswith("why is Zapdos")     # asked verbatim
+    # the ability slot survived the squeeze (reserved, not crowded out)
+    assert any(f[0] == "good as gold" for f in facts)
+
+
+def test_consult_cache_keys_on_the_question():
+    c = Caster("http://unused", "test-model", expert_url="http://x")
+    c._fact_cache["why is Zapdos a good switch-in against Iron Treads "
+                  "in competitive Pokemon"] = ("cached", {"label": "Zapdos",
+                                                          "corpus": "Smogon"})
+    got = c._retrieve_fact("Zapdos",
+                           question="why is Zapdos a good switch-in against "
+                                    "Iron Treads in competitive Pokemon")
+    assert got[0] == "cached"
+    assert c._fact_stats["cache_hit"] == 1
