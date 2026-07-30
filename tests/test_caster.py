@@ -1433,3 +1433,32 @@ def test_style_guard_double_fail_still_airs():
             "beats": [], "hud": None}
     asyncio.run(c.speak(item))
     assert c.transcript and "opting for" in c.transcript[-1][1]
+
+
+def test_overlord_state_claim_detection():
+    """Take 71 T2: 'the advantage remains with us because of the Supreme
+    Overlord stacks' — at 6-6 bodies, zero stacks exist for either side.
+    The first ability-STATE evaluator: checked against the beat's own body
+    count, precision-first (fires only when both sides are untouched)."""
+    c = Caster("http://unused", "test-model", expert_url=None)
+    fresh = {"text": "[BATTLE T2] our Kingambit vs their Kingambit. "
+                     "Bodies: us 6 standing, them 6."}
+    later = {"text": "[BATTLE T9] X vs Y. Bodies: us 4 standing, them 6."}
+    claim = ("The advantage remains with us because of the Supreme "
+             "Overlord stacks.")
+    assert c._overlord_state_claim(claim, fresh)
+    assert not c._overlord_state_claim(claim, later)      # stacks may exist
+    assert not c._overlord_state_claim(
+        "Kingambit's ability is Supreme Overlord.", fresh)  # bare mention
+    assert not c._overlord_state_claim(
+        "The Swords Dance boost is the whole story.", fresh)
+
+
+def test_fail_fence_carries_the_polarity_rule():
+    c = Caster("http://unused", "test-model", expert_url=None)
+    item = {"text": "[BATTLE T5] Last exchange: their Kingambit's Sucker "
+                    "Punch failed; our Iron Crown raised its Special Attack "
+                    "with Calm Mind. X vs Y.",
+            "beats": [], "hud": None}
+    msgs = c._prompt("PRISM", item)
+    assert "NON-attacking move" in msgs[1]["content"]

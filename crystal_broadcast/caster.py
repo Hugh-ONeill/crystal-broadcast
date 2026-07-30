@@ -874,7 +874,12 @@ class Caster:
                           "mechanical causes (a Sucker Punch fails when the "
                           "target is not attacking). Do not invent a reason "
                           "— state the fail plainly, or explain it only from "
-                          "a listed grounded fact.")
+                          "a listed grounded fact. If you name the reason "
+                          "for a priority-move fail, it is that the TARGET "
+                          "chose a NON-attacking move (a status move, a "
+                          "switch) — NEVER that someone was 'pressing an "
+                          "attack'; that is the exact opposite of how it "
+                          "works.")
         direction += (" One or two short spoken sentences, react now. "
                       "Output only the line itself.")
         if nudge:
@@ -957,6 +962,28 @@ class Caster:
         if not re.search(r"\bcrit(?:ical|s)?\b", line, re.I):
             return False
         return "critical" not in (item.get("text") or "").lower()
+
+    _OVERLORD_POWER = re.compile(
+        r"\bsupreme\s+overlord\b", re.I)
+    _POWER_VOCAB = re.compile(
+        r"\b(?:stack\w*|boost\w*|power\w*|advantage|online|matter\w*|"
+        r"stronger|damage)\b", re.I)
+    _BODIES = re.compile(r"Bodies: us (\d+) standing, them (\d+)")
+
+    def _overlord_state_claim(self, line: str, item: dict) -> bool:
+        """The first per-claim ABILITY-STATE evaluator. Take 71 T2: 'the
+        advantage remains with us because of the Supreme Overlord stacks' —
+        at 6-6 bodies. Supreme Overlord scales with FAINTED ALLIES; with
+        nobody fainted on either side, zero stacks exist for either
+        Kingambit, so any power-claim about it is false by arithmetic the
+        beat itself carries. Precision-first: fires only when BOTH sides
+        are untouched (no binding needed to know whose stacks are zero);
+        a bare ability mention without power vocabulary passes."""
+        if not (self._OVERLORD_POWER.search(line)
+                and self._POWER_VOCAB.search(line)):
+            return False
+        m = self._BODIES.search(item.get("text") or "")
+        return bool(m and m.group(1) == "6" and m.group(2) == "6")
 
     @staticmethod
     def _miss_for_immunity(line: str, item: dict) -> bool:
@@ -1592,6 +1619,20 @@ class Caster:
                         line = retry
                 except Exception:
                     pass
+            # ability-state guard: Supreme Overlord power-claims with nobody
+            # fainted (take 71 T2 — zero stacks existed); regen with the rule
+            if line and self._overlord_state_claim(line, item):
+                try:
+                    raw = await asyncio.to_thread(
+                        self._generate_sync, persona, item,
+                        "Supreme Overlord has ZERO stacks right now — it "
+                        "scales with fainted allies and nobody has fainted. "
+                        "Do not credit it with any power yet.")
+                    retry = _clean(raw)
+                    if retry and not self._overlord_state_claim(retry, item):
+                        line = retry
+                except Exception:
+                    pass
             # miss-for-immunity guard: a no-effect narrated as a miss/dodge
             # corrupts both the luck ledger and the mechanics (3 sightings
             # in one hunt); regen once with the distinction spelled out
@@ -1747,6 +1788,8 @@ class Caster:
                      lambda: self._fabricated_crit(line, item)),
                     ("miss-for-immunity",
                      lambda: self._miss_for_immunity(line, item)),
+                    ("overlord state claim",
+                     lambda: self._overlord_state_claim(line, item)),
                     ("fabricated recoil",
                      lambda: self._fabricated_recoil(line, item)),
                     ("fabricated synergy",
