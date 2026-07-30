@@ -1569,3 +1569,26 @@ def test_luck_polarity_claim_detection():
     assert not c._luck_polarity_claim(
         "The dice HATE me and that miss proves it!",
         {"text": "[BATTLE T3] X vs Y. Bodies: us 6 standing, them 6."})
+
+
+def test_hazard_state_claim_detection():
+    """Hazards treated as on the field with an empty record — the presence
+    mirror of the take-26 clear class. Setting turns, hypotheticals, idioms
+    and denials pass; any Hazards: footer passes everything."""
+    c = Caster("http://unused", "test-model", expert_url=None)
+    plain = {"text": "[BATTLE T8] X vs Y. Bodies: us 6 standing, them 6."}
+    up = {"text": "[BATTLE T8] X vs Y. Bodies: us 6 standing, them 6. "
+                  "Hazards: their side Stealth Rock."}
+    setting = {"text": "[BATTLE T8] Last exchange: our Ting-Lu set Spikes "
+                       "on their side. X vs Y."}
+    assert c._hazard_state_claim(
+        "The rocks are chipping them on every switch!", plain)
+    assert c._hazard_state_claim(
+        "Every entry into those spikes costs them!", plain)
+    assert not c._hazard_state_claim(
+        "The rocks are chipping them on every switch!", up)
+    assert not c._hazard_state_claim("Those spikes are BEAUTIFUL!", setting)
+    assert not c._hazard_state_claim(
+        "If they get the rocks up, our switching is taxed.", plain)
+    assert not c._hazard_state_claim("This game is on the rocks.", plain)
+    assert not c._hazard_state_claim("The hazards are gone at last!", plain)

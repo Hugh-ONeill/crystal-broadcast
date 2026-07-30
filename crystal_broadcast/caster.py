@@ -1091,6 +1091,38 @@ class Caster:
         text = (item.get("text") or "").lower()
         return not any(w in text for w in self._STAGE_SUPPORT)
 
+    _HAZ_CLAIM = re.compile(
+        r"\b(?:the|those|these|our|their)\s+(?:rocks|spikes|webs?|hazards)\b"
+        r"|\bstealth\s+rock\b|\btoxic\s+spikes\b|\bsticky\s+web\b"
+        r"|\bsteelsurge\b"
+        r"|\bhazards?\s+(?:are|is)\s+(?:up|set|there|active)\b"
+        r"|\b(?:chip|damage)\s+from\s+the\s+(?:rocks|spikes|web|hazards)\b",
+        re.I)
+    _HAZ_NOT_NOW = re.compile(
+        r"\b(?:gone|cleared|removed|spun|spin\w*|defog\w*|blown|break\w*|"
+        r"broke\w*|no|none|without|lost|if|could|would|might|may|once|"
+        r"when|unless|want\w*|need\w*|hop\w+|before|threat\w*|"
+        r"set(?:s|ting)?\s+up|go(?:es)?\s+up|put(?:s|ting)?\s+up|coming|"
+        r"on\s+the\s+rocks)\b", re.I)
+
+    def _hazard_state_claim(self, line: str, item: dict) -> bool:
+        """True when the line treats entry hazards as ON THE FIELD and no
+        hazard is in evidence anywhere in the beat — footer or exchange.
+        The take-26 class ('the hazards are gone' from a boost Rapid Spin)
+        is guarded on the CLEAR side by _fabricated_hazard_clear; this is
+        the presence side ('the rocks are chipping them' over an empty
+        field). When a Hazards: footer exists at all the support check
+        passes everything — side-binding 'the rocks' is guesswork."""
+        m = self._HAZ_CLAIM.search(line)
+        if not m:
+            return False
+        if self._HAZ_NOT_NOW.search(self._claim_sentence(line, m.start())):
+            return False
+        text = (item.get("text") or "").lower()
+        return not any(w in text for w in
+                       ("hazard", "stealth rock", "spikes", "sticky web",
+                        "steelsurge"))
+
     # Miss prose always leads with the MOVER's possessive ("their Zapdos's
     # Hurricane missed our Iron Crown"), and clauses are ";"-joined, so the
     # first side-word inside the clause is the side the dice went against.
@@ -1824,6 +1856,19 @@ class Caster:
                         line = retry
                 except Exception:
                     pass
+            if line and self._hazard_state_claim(line, item):
+                try:
+                    raw = await asyncio.to_thread(
+                        self._generate_sync, persona, item,
+                        "Do NOT talk about entry hazards being on the "
+                        "field — the beat reports no Stealth Rock, Spikes, "
+                        "Toxic Spikes or Sticky Web up on either side. "
+                        "React to what the beat actually reports.")
+                    retry = _clean(raw)
+                    if retry and not self._hazard_state_claim(retry, item):
+                        line = retry
+                except Exception:
+                    pass
             # luck-polarity guard: a dice grievance pointed the wrong way
             # round (their miss rendered as our persecution, or ours as a
             # payback) — the beat states whose move missed
@@ -2010,6 +2055,8 @@ class Caster:
                      lambda: self._boost_state_claim(line, item)),
                     ("luck polarity claim",
                      lambda: self._luck_polarity_claim(line, item)),
+                    ("hazard state claim",
+                     lambda: self._hazard_state_claim(line, item)),
                     ("fabricated recoil",
                      lambda: self._fabricated_recoil(line, item)),
                     ("fabricated synergy",
