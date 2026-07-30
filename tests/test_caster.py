@@ -1127,3 +1127,103 @@ def test_naming_rapid_spin_is_not_a_claim():
     assert not c._fabricated_hazard_clear(
         "The search is choosing Rapid Spin for the chip damage.",
         {"text": "[BATTLE T33] Iron Treads raised its Speed with Rapid Spin."})
+
+
+# --- take 27 follow-ups: stolen calls + deficit lead-swap -------------------
+
+def test_stolen_call_detection():
+    """Take 27 T14: FRACTURE's first-ever mention of Icicle Spear opened
+    'I TOLD YOU THAT ICICLE SPEAR WAS THE FINAL NAIL' — the call was PRISM's,
+    one beat earlier. A fabricated past, checkable against the transcript."""
+    c = Caster("http://unused", "test-model", expert_url=None)
+    c._match_lines = {"FRACTURE": [], "PRISM": []}
+    line = "KINGAMBIT IS GONE! I TOLD YOU THAT ICICLE SPEAR WAS THE FINAL NAIL!"
+    # no prior mention -> stolen (all-caps line: case-insensitive binding)
+    assert c._stolen_call(line, "FRACTURE") == "Icicle Spear"
+    # she really did talk about it earlier -> the bit working as intended
+    c._match_lines["FRACTURE"].append(
+        "THAT ICICLE SPEAR IS GOING TO END SOMEBODY'S CAREER!")
+    assert c._stolen_call(line, "FRACTURE") is None
+    # per-persona: PRISM having said it does NOT license her claim
+    c._match_lines = {"FRACTURE": [],
+                      "PRISM": ["The Icicle Spear chips Kingambit down."]}
+    assert c._stolen_call(line, "FRACTURE") == "Icicle Spear"
+    # subject-free bravado (the set-reveal bit) never fires
+    assert c._stolen_call("I CALLED IT! I KNEW IT THE WHOLE TIME!",
+                          "FRACTURE") is None
+    # no claim phrase at all -> never fires, whatever entities appear
+    assert c._stolen_call("THAT ICICLE SPEAR WAS BEAUTIFUL!",
+                          "FRACTURE") is None
+    # binding is scoped to the claim SENTENCE: a fresh entity elsewhere in
+    # the line is an innocent first mention, not a stolen call
+    c._match_lines = {"FRACTURE": ["Kingambit folds to this."]}
+    assert c._stolen_call(
+        "Zapdos is in! Like I said, Kingambit folds.", "FRACTURE") is None
+
+
+def test_stolen_call_triggers_one_regen():
+    c = Caster("http://unused", "test-model", expert_url=None)
+    calls = []
+
+    def fake_gen(persona, item, nudge=None, temp_boost=0.0):
+        calls.append(nudge)
+        return ("I TOLD YOU THAT ICICLE SPEAR WAS THE FINAL NAIL!"
+                if nudge is None else
+                "ICICLE SPEAR ENDS IT! WHAT A FINISH!")
+
+    c._generate_sync = fake_gen
+    c._ungrounded_entity = lambda line, item: None   # isolate this guard
+    item = {"text": "[BATTLE T14] our Kyurem's Icicle Spear knocked out "
+                    "their Kingambit. Kyurem vs Cinderace.",
+            "beats": [], "hud": None}
+    asyncio.run(c.speak(item))
+    assert len(calls) == 2 and "Icicle Spear" in calls[1]     # regenerated
+    assert "told you" not in c.transcript[-1][1].lower()
+
+
+def test_deficit_swap_gives_the_lead_to_the_trailing_voice():
+    """Take 27: the pre-flight budget cut the SECOND voice 5:1 against
+    PRISM (gremlin-first convention), 15:8 aggregate with his lines
+    front-loaded. When his per-match tally trails by DEFICIT_SWAP, he takes
+    the lead on the next dual beat — and the lead always speaks."""
+    import types as _types
+    c = Caster("http://unused", "test-model", expert_url=None)
+    order = []
+
+    def fake_gen(persona, item, nudge=None, temp_boost=0.0):
+        order.append(persona)
+        return f"a line from {persona}"
+
+    c._generate_sync = fake_gen
+    c._ungrounded_entity = lambda line, item: None
+    c.speech = _types.SimpleNamespace(speak=lambda *a: None)
+    c._spoken = {"FRACTURE": 5, "PRISM": 2}
+    item = {"text": "[BATTLE T9] our Kyurem's Icicle Spear knocked out "
+                    "their Kingambit.",
+            "beats": [{"beat": "ko", "persona": "both",
+                       "handoff": ["gremlin", "analyst"]}],
+            "hud": None}
+    asyncio.run(c.speak(item))
+    assert order[0] == "PRISM"
+
+
+def test_deficit_swap_is_speech_mode_only():
+    """Text mode airs both voices, so a tally gap there is content (solo
+    beats), not a budget artifact — ordering must stay byte-identical."""
+    c = Caster("http://unused", "test-model", expert_url=None)
+    order = []
+
+    def fake_gen(persona, item, nudge=None, temp_boost=0.0):
+        order.append(persona)
+        return f"a line from {persona}"
+
+    c._generate_sync = fake_gen
+    c._ungrounded_entity = lambda line, item: None
+    c._spoken = {"FRACTURE": 5, "PRISM": 2}
+    item = {"text": "[BATTLE T9] our Kyurem's Icicle Spear knocked out "
+                    "their Kingambit.",
+            "beats": [{"beat": "ko", "persona": "both",
+                       "handoff": ["gremlin", "analyst"]}],
+            "hud": None}
+    asyncio.run(c.speak(item))
+    assert order[0] == "FRACTURE"

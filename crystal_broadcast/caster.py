@@ -365,6 +365,18 @@ class Caster:
         # consecutive speech drops per persona, so a starved voice can take
         # the lead back (see the rotation in speak())
         self._drops: dict = {}
+        # Per-match spoken-line tallies and the lines themselves. _spoken
+        # drives the deficit lead-swap: take 27 ran 15:8 with every PRISM
+        # line in the first 13 turns, because the pre-flight budget cuts the
+        # SECOND voice and the gremlin-first convention makes that PRISM
+        # 5:1. The consecutive-drops rotation above can't see it — his
+        # counter resets every time a solo beat lets him speak. _match_lines
+        # backs the claimed-call guard (_stolen_call). Reset at MATCH START.
+        self._spoken: dict = {}
+        self._match_lines: dict = {}
+        # spoken-line gap at which the trailing voice takes the lead on dual
+        # beats (lead speaks unconditionally, so leading = speaking)
+        self.DEFICIT_SWAP = 3
         # Consecutive drops before a voice takes the lead back. MEASURED at
         # 2 over two full takes: 1.6:1 and 1.3:1 gremlin-to-analyst, against a
         # 2:1 ideal and 3:1 acceptable — so 2 already lands slightly MORE
@@ -620,6 +632,8 @@ class Caster:
                         # in-battle narration of each mechanic is a cache hit
                         self._reset_fact_stats()
                         self._reset_pace_stats()
+                        self._spoken = {}
+                        self._match_lines = {}
                         blob = data.get("preview_text")
                         if blob and self.expert_url:
                             self._warm_task = asyncio.create_task(
@@ -883,6 +897,51 @@ class Caster:
                 continue
             nl = name.lower()
             if nl in low and nl not in allowed_low and name in line:
+                return name
+        return None
+
+    _CLAIM_RE = re.compile(
+        r"\b(?:i\s+(?:told\s+you|said|called\s+(?:it|that|this)|"
+        r"promised(?:\s+you)?)|like\s+i\s+(?:said|told\s+you)|"
+        r"i(?:'ve|\s+have)\s+been\s+saying)\b", re.I)
+
+    def _stolen_call(self, line: str, persona: str) -> str | None:
+        """The entity behind an 'I told you / I called it' the speaker never
+        previously mentioned — or None.
+
+        Take 27 T14: PRISM named the Icicle Spear plan on T13; one beat
+        later FRACTURE opened 'I TOLD YOU THAT ICICLE SPEAR WAS THE FINAL
+        NAIL IN THE COFFIN' — her first mention of the move, the call her
+        desk mate's. A fabricated past is checkable against the on-screen
+        transcript, which is what makes it worse than ordinary bravado.
+
+        Binding is entity-based like _ungrounded_entity and scoped to the
+        claim-bearing SENTENCE, so a subject-free 'I called it!' (the
+        set-reveal bit, part of her contract) never fires, and an innocent
+        first mention elsewhere in the line doesn't either. FRACTURE shouts
+        in caps, which destroys the capitalisation signal the entity guard
+        leans on — so all-caps lines match case-insensitively instead.
+        Verified against the speaker's OWN lines this match (_match_lines):
+        claiming a call she really made is the bit working as intended."""
+        if not self._CLAIM_RE.search(line):
+            return None
+        try:
+            from crystal_broadcast.game_data import DATA
+            names = DATA.entity_names()
+        except Exception:
+            return None
+        claim_text = " ".join(
+            s for s in re.split(r"(?<=[.!?])\s+", line)
+            if self._CLAIM_RE.search(s))
+        prior = " ".join(self._match_lines.get(persona, ())).lower()
+        caps_blind = claim_text.isupper()
+        claim_low = claim_text.lower()
+        for name in names:
+            if len(name) < 4:
+                continue
+            nl = name.lower()
+            if (nl in claim_low and (caps_blind or name in claim_text)
+                    and nl not in prior):
                 return name
         return None
 
@@ -1199,8 +1258,18 @@ class Caster:
         # lead when the trailing voice has been starved, so the cost of a
         # tight budget lands on whoever has been speaking, not on whoever the
         # convention happens to put second.
-        if (len(speakers) > 1
-                and self._drops.get(speakers[-1], 0) >= self.STARVED_AFTER):
+        # Two triggers, one remedy. STARVED_AFTER catches a run of
+        # consecutive cuts; it missed take 27 (5:1 PRISM cuts, all his lines
+        # in the first 13 turns) because solo beats kept resetting his
+        # counter between cuts. The DEFICIT_SWAP trigger reads the per-match
+        # TALLY instead, which nothing resets. Speech mode only: in text
+        # mode both voices always air, so the tally gap is content (solo
+        # beats), not a budget artifact, and ordering stays byte-identical.
+        starved = (self._drops.get(speakers[-1], 0) >= self.STARVED_AFTER)
+        behind = (self.speech is not None
+                  and self._spoken.get(speakers[0], 0)
+                  - self._spoken.get(speakers[-1], 0) >= self.DEFICIT_SWAP)
+        if len(speakers) > 1 and (starved or behind):
             speakers = list(reversed(speakers))
         deliberating = any(b.get("beat") == "deep_think"
                            for b in item.get("beats") or [])
@@ -1386,6 +1455,30 @@ class Caster:
                         line = retry
                 except Exception:
                     pass
+            # claimed-call guard: "I told you / I called it" about something
+            # the speaker never previously mentioned — a fabricated PAST,
+            # same family as the invented turn numbers. Take 27 T14:
+            # FRACTURE's first-ever mention of Icicle Spear opened "I TOLD
+            # YOU THAT ICICLE SPEAR WAS THE FINAL NAIL" — the call was
+            # PRISM's, one beat earlier.
+            stolen = self._stolen_call(line, persona) if line else None
+            if stolen:
+                try:
+                    raw = await asyncio.to_thread(
+                        self._generate_sync, persona, item,
+                        f"You have NOT previously said anything about "
+                        f"{stolen} this match — do not claim you told "
+                        f"anyone, called it, or said so earlier. React to "
+                        f"it fresh, in the present.")
+                    retry = _sanitize(_SELF_LABEL.sub("", raw.strip()))
+                    retry = _fix_species_spelling(retry, item)
+                    if retry and not self._stolen_call(retry, persona):
+                        line = retry
+                    else:
+                        print(f"caster: stolen call ({stolen}) survived a "
+                              f"regen", flush=True)
+                except Exception:
+                    pass
             # caption-mode guard: PRISM restating the move or reciting the
             # desk read back ('the search is opting for X') — regen once for
             # meaning over caption; keep the retry only if it clears
@@ -1456,6 +1549,8 @@ class Caster:
                       f"budget", flush=True)
                 break
             self._drops[persona] = 0      # spoke: no longer starved
+            self._spoken[persona] = self._spoken.get(persona, 0) + 1
+            self._match_lines.setdefault(persona, []).append(line)
             self.transcript.append((persona, line))
             if deliberating and persona == "FRACTURE":
                 self._match_stalls.append(line)
