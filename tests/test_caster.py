@@ -1527,3 +1527,45 @@ def test_boost_state_claim_detection():
         "Sucker Punch is a +1 priority move.", plain)
     assert not c._boost_state_claim(
         "Kingambit inherits all of it at +2.", bp)
+
+
+def test_luck_polarity_claim_detection():
+    """Take 72 T14: 'their Zapdos's Hurricane missed our Iron Crown' — luck
+    against THEM — aired as 'the dice are TRYING to stop my Iron Crown'.
+    The beat states whose move missed, so an inverted dice grievance is
+    false by the record; correctly-pointed grief and celebration pass."""
+    c = Caster("http://unused", "test-model", expert_url=None)
+    their_miss = {"text": "[BATTLE T14] Last exchange: their Zapdos's "
+                          "Hurricane missed our Iron Crown; our Iron Crown "
+                          "raised its Special Attack with Calm Mind. "
+                          "Iron Crown (100% hp) vs Slowking-Galar (100% hp). "
+                          "Bodies: us 5 standing, them 4."}
+    our_miss = {"text": "[BATTLE T20] Last exchange: our Kingambit's Iron "
+                        "Head missed their Great Tusk — the second time the "
+                        "dice have gone against us this game. X vs Y. "
+                        "Bodies: us 5 standing, them 4."}
+    both = {"text": "[BATTLE T22] Last exchange: our Kingambit's Iron Head "
+                    "missed their Great Tusk; their Great Tusk's Ice "
+                    "Spinner missed our Kingambit. X vs Y."}
+    inverted = ("The server saw me setting up and DECIDED that Hurricane "
+                "should MISS! THE DICE are LITERALLY actively TRYING to "
+                "stop my Iron Crown from sweeping!")
+    assert c._luck_polarity_claim(inverted, their_miss)
+    # their miss celebrated the right way round
+    assert not c._luck_polarity_claim(
+        "THE DICE ARE FINALLY PAYING ME BACK! That Hurricane missing is "
+        "exactly what I needed to see!", their_miss)
+    # our miss grieved the right way round
+    assert not c._luck_polarity_claim(
+        "The dice are AGAINST US again! That Iron Head missing is a "
+        "ROBBERY!", our_miss)
+    # our own miss celebrated as a payback — the mirror inversion
+    assert c._luck_polarity_claim(
+        "THE DICE ARE PAYING ME BACK! That Iron Head missing is a GIFT!",
+        our_miss)
+    # both sides missed -> ambiguous, abstain
+    assert not c._luck_polarity_claim(inverted, both)
+    # no miss in the beat -> abstain regardless of grievance
+    assert not c._luck_polarity_claim(
+        "The dice HATE me and that miss proves it!",
+        {"text": "[BATTLE T3] X vs Y. Bodies: us 6 standing, them 6."})

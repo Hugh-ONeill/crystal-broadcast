@@ -1091,6 +1091,50 @@ class Caster:
         text = (item.get("text") or "").lower()
         return not any(w in text for w in self._STAGE_SUPPORT)
 
+    # Miss prose always leads with the MOVER's possessive ("their Zapdos's
+    # Hurricane missed our Iron Crown"), and clauses are ";"-joined, so the
+    # first side-word inside the clause is the side the dice went against.
+    _MISS_IN_BEAT = re.compile(r"\b(our|their)\s+[^;.!:]*?\bmissed\b")
+    _DICE_WORD = re.compile(r"\b(?:dice|server|rng|luck|hax)\b", re.I)
+    _LUCK_AGAINST_US = re.compile(
+        r"\b(?:against\s+(?:us|me)|stop(?:ping)?\s+(?:my|our|me)\b|"
+        r"rob(?:bed|bing)?\s+(?:us|me)|screw(?:ed|ing)?\s+(?:us|me)|"
+        r"punish(?:ing|ed)?\s+(?:us|me)|out\s+to\s+get\s+(?:us|me)|"
+        r"hates?\s+(?:us|me)|cheat(?:ed|ing)?\s+(?:us|me))", re.I)
+    _LUCK_FAVOR_US = re.compile(
+        r"\b(?:paying\s+(?:us|me)\s+back|against\s+them|"
+        r"on\s+(?:our|my)\s+side|going\s+(?:our|my)\s+way|"
+        r"love[sd]?\s+(?:us|me)|owed|repaid)", re.I)
+
+    def _beat_miss_directions(self, item: dict) -> set:
+        """Which side(s) the beat's misses went against — the MOVER's side,
+        'our' or 'their'."""
+        return set(self._MISS_IN_BEAT.findall(item.get("text") or ""))
+
+    def _luck_polarity_claim(self, line: str, item: dict) -> bool:
+        """True when a dice-grievance inverts the polarity of the beat's
+        miss. Take 72 T14: 'their Zapdos's Hurricane missed our Iron Crown'
+        — luck against THEM, and the ledger counted it that way — but
+        FRACTURE aired 'the server DECIDED that Hurricane should MISS! THE
+        DICE are TRYING to stop my Iron Crown!' — their miss rendered as
+        our persecution. Whose move missed is stated in the beat, so the
+        inversion is false by the record; the mirror case (celebrating a
+        payback over OUR OWN miss) is the same arithmetic. Abstains when
+        the beat's misses point both ways, or when its ledger suffix names
+        a same-beat luck event on the other side."""
+        dirs = self._beat_miss_directions(item)
+        if len(dirs) != 1:
+            return False
+        if not (self._DICE_WORD.search(line)
+                and re.search(r"\bmiss\w*\b", line, re.I)):
+            return False
+        text = (item.get("text") or "").lower()
+        if dirs == {"their"}:
+            return bool(self._LUCK_AGAINST_US.search(line)
+                        and "dice have gone against us" not in text)
+        return bool(self._LUCK_FAVOR_US.search(line)
+                    and "dice have gone against them" not in text)
+
     @staticmethod
     def _miss_for_immunity(line: str, item: dict) -> bool:
         """True when the line narrates a no-effect as a miss/dodge — three
@@ -1780,6 +1824,27 @@ class Caster:
                         line = retry
                 except Exception:
                     pass
+            # luck-polarity guard: a dice grievance pointed the wrong way
+            # round (their miss rendered as our persecution, or ours as a
+            # payback) — the beat states whose move missed
+            if line and self._luck_polarity_claim(line, item):
+                if "their" in self._beat_miss_directions(item):
+                    note = ("The miss in this beat went against THEM — "
+                            "THEIR move missed. That is luck in OUR favor. "
+                            "Do not frame it as the dice or the server "
+                            "working against us.")
+                else:
+                    note = ("The miss in this beat was OURS — OUR move "
+                            "missed. That is luck against US. Do not frame "
+                            "it as the dice paying us back or favoring us.")
+                try:
+                    raw = await asyncio.to_thread(
+                        self._generate_sync, persona, item, note)
+                    retry = _clean(raw)
+                    if retry and not self._luck_polarity_claim(retry, item):
+                        line = retry
+                except Exception:
+                    pass
             # miss-for-immunity guard: a no-effect narrated as a miss/dodge
             # corrupts both the luck ledger and the mechanics (3 sightings
             # in one hunt); regen once with the distinction spelled out
@@ -1943,6 +2008,8 @@ class Caster:
                      lambda: self._screens_state_claim(line, item)),
                     ("boost state claim",
                      lambda: self._boost_state_claim(line, item)),
+                    ("luck polarity claim",
+                     lambda: self._luck_polarity_claim(line, item)),
                     ("fabricated recoil",
                      lambda: self._fabricated_recoil(line, item)),
                     ("fabricated synergy",
