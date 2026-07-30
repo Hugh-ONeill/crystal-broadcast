@@ -1704,3 +1704,37 @@ def test_fail_mechanism_claim_detection():
     assert not c._fail_mechanism_claim(
         "Kommo-o is immune to that.",
         {"text": "[BATTLE T3] X vs Y. Bodies: us 6 standing, them 6."})
+
+
+def test_item_polarity_claim_detection():
+    """Measured live 2026-07-28, 4 occurrences in 147 beats: 'The Booster
+    Energy is gone, so we lost our speed advantage' — exactly backwards,
+    because spending it is what switches Quark Drive ON. The director's
+    prose fix removed the invitation; this rules on the claim."""
+    c = Caster("http://unused", "test-model", expert_url=None)
+    activated = {"text": "[BATTLE T2] Last exchange: our Iron Valiant's "
+                         "Booster Energy kicked in; our Iron Valiant's "
+                         "Focus Blast knocked out their Kingambit. "
+                         "Iron Valiant (100% hp) vs Zapdos (100% hp)."}
+    knocked = {"text": "[BATTLE T7] Last exchange: their Great Tusk's Knock "
+                       "Off knocked off our Kommo-o's Leftovers."}
+    herb = {"text": "[BATTLE T9] Last exchange: their Great Tusk's White "
+                    "Herb undid the stat drops."}
+    assert c._item_polarity_claim(
+        "The Booster Energy is gone, so we lost our speed advantage.",
+        activated)
+    assert c._item_polarity_claim(
+        "That's the Booster Energy wasted for nothing!", activated)
+    assert c._item_polarity_claim(
+        "Their White Herb is spent and they are down an item.", herb)
+    # the correct reading: consumption IS the effect
+    assert not c._item_polarity_claim(
+        "The Booster Energy kicked in, so Quark Drive is online and that "
+        "Speed tier is ours now.", activated)
+    # a REAL denial is a real loss — never rule against grieving it
+    assert not c._item_polarity_claim(
+        "Our Leftovers are gone and that recovery is lost for good.",
+        knocked)
+    # item not named in the line
+    assert not c._item_polarity_claim(
+        "We lost our speed advantage there.", activated)

@@ -1120,6 +1120,52 @@ class Caster:
         text = (item.get("text") or "").lower()
         return not any(w in text for w in self._STAGE_SUPPORT)
 
+    # The director deliberately words a consumed item by what the
+    # consumption DID ("Booster Energy kicked in"), because "used up its X"
+    # is loss-coded before the caster ever reads it — measured live
+    # 2026-07-28 as "The Booster Energy is gone, so we lost our speed
+    # advantage", 4 occurrences in 147 beats, every one framed as a loss.
+    # Spending it is what switches Quark Drive ON. The prose fix removed
+    # the invitation; this guard rules on the claim itself.
+    _ITEM_ACTIVATED = re.compile(
+        r"([A-Z][\w'-]*(?:\s+[A-Z][\w'-]*)*)\s+"
+        r"(?:kicked in|activated|fired|undid the stat drops|"
+        r"skipped the charge turn|shook off the restriction)")
+    # Real item denials keep their own prose and ARE losses — never rule
+    # against a line grieving one of these.
+    _ITEM_DENIED = re.compile(
+        r"\b(?:knocked off|swiped|popped|stole|took)\b", re.I)
+    _ITEM_LOSS_FRAME = re.compile(
+        r"\b(?:gone|lost|losing|lose|wasted|burnt|burned through|"
+        r"used up|spent|no longer|without|stripped|down an item|"
+        r"deprived|robbed of|missing)\b", re.I)
+
+    def _item_polarity_claim(self, line: str, item: dict) -> bool:
+        """True when an item that ACTIVATED is narrated as a loss. The beat
+        says the Booster Energy kicked in — that is Quark Drive coming
+        online — and a line reading it as 'the Booster Energy is gone, so
+        we lost our speed advantage' inverts the mechanic.
+
+        Precision-first: the item must be named in the line, the loss frame
+        must sit in the same sentence, and any real denial in the beat
+        (Knock Off, theft, a popped Air Balloon) makes the guard abstain —
+        those genuinely are losses and the desk should say so."""
+        text = item.get("text") or ""
+        if self._ITEM_DENIED.search(text):
+            return False
+        for m in self._ITEM_ACTIVATED.finditer(text):
+            name = m.group(1)
+            # strip a leading possessive holder ("our Iron Valiant's
+            # Booster Energy" -> the capture starts at the holder)
+            item_name = name.split("'s ")[-1].strip()
+            if len(item_name) < 4 or item_name.lower() not in line.lower():
+                continue
+            idx = line.lower().index(item_name.lower())
+            if self._ITEM_LOSS_FRAME.search(
+                    self._claim_sentence(line, idx)):
+                return True
+        return False
+
     _TYPE_MECHANISM = re.compile(
         r"\b(?:immun\w+|no\s+effect|does(?:n't|\s+not)\s+affect|"
         r"resist\w*|super[- ]effective|not\s+very\s+effective|"
@@ -1970,6 +2016,20 @@ class Caster:
                         line = retry
                 except Exception:
                     pass
+            # item-polarity guard: an item that ACTIVATED read as a loss
+            if line and self._item_polarity_claim(line, item):
+                try:
+                    raw = await asyncio.to_thread(
+                        self._generate_sync, persona, item,
+                        "That item was CONSUMED BY WORKING — spending it is "
+                        "what turns its effect ON. Nothing was lost and "
+                        "nothing was taken. Do not frame it as a loss, a "
+                        "waste, or an advantage gone.")
+                    retry = _clean(raw)
+                    if retry and not self._item_polarity_claim(retry, item):
+                        line = retry
+                except Exception:
+                    pass
             # fail-semantics guard: a failure explained by a type
             # interaction, an immunity or a miss — the founding case of
             # this family (take 30 T5), which the prompt fence alone
@@ -2213,6 +2273,8 @@ class Caster:
                      lambda: self._boost_polarity_claim(line, item)),
                     ("fail mechanism claim",
                      lambda: self._fail_mechanism_claim(line, item)),
+                    ("item polarity claim",
+                     lambda: self._item_polarity_claim(line, item)),
                     ("fabricated recoil",
                      lambda: self._fabricated_recoil(line, item)),
                     ("fabricated synergy",
