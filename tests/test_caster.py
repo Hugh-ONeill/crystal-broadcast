@@ -1462,3 +1462,68 @@ def test_fail_fence_carries_the_polarity_rule():
             "beats": [], "hud": None}
     msgs = c._prompt("PRISM", item)
     assert "NON-attacking move" in msgs[1]["content"]
+
+
+def test_weather_state_claim_detection():
+    """'in this sun' with no sun anywhere in the beat is the phantom-crit
+    shape about the field; transitions, retrospectives and hypotheticals
+    never trip it."""
+    c = Caster("http://unused", "test-model", expert_url=None)
+    plain = {"text": "[BATTLE T9] our Heatran (70% hp) vs their Kingambit "
+                     "(88% hp). Bodies: us 6 standing, them 6."}
+    sunny = {"text": "[BATTLE T9] X vs Y. Bodies: us 6 standing, them 6. "
+                     "Weather: harsh sun."}
+    assert c._weather_state_claim("Our Heatran thrives in this sun.", plain)
+    assert c._weather_state_claim("The rain keeps pounding their side.",
+                                  plain)
+    assert not c._weather_state_claim("Our Heatran thrives in this sun.",
+                                      sunny)
+    assert not c._weather_state_claim(
+        "The sun is gone and so is their plan.", plain)
+    assert not c._weather_state_claim(
+        "We could be under the rain soon if they click it.", plain)
+    assert not c._weather_state_claim(
+        "They tried every trick under the sun.", plain)
+
+
+def test_screens_state_claim_detection():
+    """Screens treated as active with nothing up and none mentioned; when a
+    Screens: footer exists at all the guard stays out (side-binding a bare
+    'behind screens' is guesswork)."""
+    c = Caster("http://unused", "test-model", expert_url=None)
+    plain = {"text": "[BATTLE T12] X vs Y. Bodies: us 5 standing, them 5."}
+    up = {"text": "[BATTLE T12] X vs Y. Bodies: us 5 standing, them 5. "
+                  "Screens: their Reflect."}
+    assert c._screens_state_claim(
+        "We're chipping away behind the screens.", plain)
+    assert c._screens_state_claim(
+        "Light Screen is up, so that hit was halved.", plain)
+    assert not c._screens_state_claim(
+        "We're chipping away behind the screens.", up)
+    assert not c._screens_state_claim(
+        "Our screens are gone at last.", plain)
+    assert not c._screens_state_claim(
+        "What these numbers reflect is a grim read.", plain)
+
+
+def test_boost_state_claim_detection():
+    """A numeric stage stated from nothing — no Boosts: footer, no
+    stat-change language — is an invented power state; real boosts,
+    hypotheticals, priority talk and Baton Pass hand-offs all pass."""
+    c = Caster("http://unused", "test-model", expert_url=None)
+    plain = {"text": "[BATTLE T10] X vs Y. Bodies: us 5 standing, them 5."}
+    boosted = {"text": "[BATTLE T10] Last exchange: our Kingambit sharply "
+                       "raised its Attack with Swords Dance. X vs Y. "
+                       "Boosts: our Kingambit +2 Attack."}
+    bp = {"text": "[BATTLE T11] Last exchange: our Scizor used Baton Pass. "
+                  "X vs Y."}
+    assert c._boost_state_claim(
+        "Kingambit is sitting at +2 and nobody can answer it.", plain)
+    assert c._boost_state_claim("That thing is plus two right now.", plain)
+    assert not c._boost_state_claim("Kingambit is sitting at +2.", boosted)
+    assert not c._boost_state_claim(
+        "If it gets to +2, we lose the game.", plain)
+    assert not c._boost_state_claim(
+        "Sucker Punch is a +1 priority move.", plain)
+    assert not c._boost_state_claim(
+        "Kingambit inherits all of it at +2.", bp)

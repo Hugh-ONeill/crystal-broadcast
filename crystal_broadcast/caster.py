@@ -985,6 +985,112 @@ class Caster:
         m = self._BODIES.search(item.get("text") or "")
         return bool(m and m.group(1) == "6" and m.group(2) == "6")
 
+    # --- field-state guards: weather/screens/boost claims checked against
+    # the state footer the director stamps into every beat ("Weather: rain.",
+    # "Screens: our Reflect.", "Boosts: their Volcarona +1 Special Attack.")
+    # plus the exchange prose around it. All three share the overlord guard's
+    # contract: default-pass, fire only when a present-tense claim has ZERO
+    # support anywhere in the beat text — so transitions ("Drought set harsh
+    # sun up"), retrospectives ("the rain is gone") and hypotheticals ("if
+    # they get screens up") never trip them.
+
+    @staticmethod
+    def _claim_sentence(line: str, pos: int) -> str:
+        """The sentence of `line` containing offset `pos` — the window the
+        not-now/speculation scans run over. Abbreviation periods (K.O) only
+        shrink the window, which errs toward firing; the speculation tokens
+        are broad enough to absorb that."""
+        start = max(line.rfind(".", 0, pos), line.rfind("!", 0, pos),
+                    line.rfind("?", 0, pos)) + 1
+        ends = [i for i in (line.find(".", pos), line.find("!", pos),
+                            line.find("?", pos)) if i != -1]
+        return line[start:min(ends) if ends else len(line)]
+
+    _WX_CLAIM = re.compile(
+        r"\b(?:in|under|through)\s+(?:th(?:is|e|at)\s+)?"
+        r"(?:rain|sun(?:light|shine)?|sandstorm|snow|hail)\b"
+        r"|\bthe\s+(?:rain|sun(?:light|shine)?|sand(?:storm)?|snow|hail)\s+"
+        r"(?:is|stays|keeps|remains|continues|pelts|batters|chips|falls|"
+        r"beats|pounds|rages)\b"
+        r"|\b(?:rain|sun|sand|snow|hail)-boosted\b", re.I)
+    _WX_NOT_NOW = re.compile(
+        r"\b(?:gone|cleared|clears|fade[sd]?|over|end(?:s|ed)?|expir\w+|"
+        r"ran out|runs out|dried|down|without|no longer|lost|"
+        r"if|could|would|might|may|once|when|unless|before|soon|"
+        r"coming|incoming|hop\w+|want\w*|need\w*|threat\w*|"
+        r"set(?:s|ting)?\s+up|summon\w*|bring\w*|"
+        r"every\w*\s+\w+\s+under\s+the\s+sun)\b", re.I)
+
+    def _weather_state_claim(self, line: str, item: dict) -> bool:
+        """True when the line treats a weather as ACTIVE and no form of that
+        weather appears anywhere in the beat — footer or exchange. 'in this
+        sun' with no sun up is the same invention as the phantom crit, just
+        about the field instead of the dice."""
+        text = (item.get("text") or "").lower()
+        for m in self._WX_CLAIM.finditer(line):
+            if self._WX_NOT_NOW.search(self._claim_sentence(line, m.start())):
+                continue
+            tok = m.group(0).lower()
+            fam = ("rain" if "rain" in tok else
+                   "sand" if "sand" in tok else
+                   "sun" if "sun" in tok else "snow")
+            roots = ("snow", "hail") if fam == "snow" else (fam,)
+            if not any(r in text for r in roots):
+                return True
+        return False
+
+    _SCR_CLAIM = re.compile(
+        r"\b(?:behind|under)\s+(?:the\s+|a\s+|our\s+|their\s+|dual\s+|"
+        r"both\s+)?(?:screens?|reflect|light\s+screen|aurora\s+veil|veil)\b"
+        r"|\b(?:screens?|reflect|light\s+screen|aurora\s+veil|veil)\s+"
+        r"(?:is|are)\s+(?:up|active|still|online|holding)\b"
+        r"|\b(?:the|our|their|dual|both)\s+screens\b", re.I)
+    _SCR_NOT_NOW = re.compile(
+        r"\b(?:broke\w*|break\w*|shatter\w*|gone|wore|worn|fade[sd]?|"
+        r"expir\w+|down|end(?:s|ed)?|cleared|removed|blown|without|no|"
+        r"none|lost|if|could|would|might|may|once|when|unless|want\w*|"
+        r"need\w*|hop\w+|before|threat\w*|set(?:s|ting)?\s+up|"
+        r"go(?:es)?\s+up|put(?:s|ting)?\s+up|coming|veil\s+of)\b", re.I)
+
+    def _screens_state_claim(self, line: str, item: dict) -> bool:
+        """True when the line treats screens as ACTIVE and no screen is in
+        evidence anywhere in the beat. Fires only in the nothing-up case:
+        when a Screens: footer exists at all, side-binding a bare 'behind
+        screens' is guesswork and the guard stays out of it."""
+        m = self._SCR_CLAIM.search(line)
+        if not m:
+            return False
+        if self._SCR_NOT_NOW.search(self._claim_sentence(line, m.start())):
+            return False
+        text = (item.get("text") or "").lower()
+        return not any(w in text for w in ("screen", "reflect", "veil"))
+
+    _STAGE_CLAIM = re.compile(
+        r"(?:^|[\s(])\+\d\b"
+        r"|\bplus[- ](?:one|two|three|four|five|six|\d)\b"
+        r"|\bminus[- ](?:one|two|three|\d)\b", re.I)
+    _STAGE_NOT_NOW = re.compile(
+        r"\b(?:if|could|would|might|may|once|when|unless|after|gets?|"
+        r"reach\w*|want\w*|threat\w*|imagine|before|risk\w*|fish\w*|"
+        r"looking|priorit\w+)\b", re.I)
+    _STAGE_SUPPORT = ("boosts:", "raise", "rose", "boost", "maxed",
+                      "dropped", "cut", "fell", "lowered", "stat",
+                      "baton pass", "psych up")
+
+    def _boost_state_claim(self, line: str, item: dict) -> bool:
+        """True when the line states a numeric stat stage ('at +2') and the
+        beat carries neither a Boosts: footer nor any stat-change language —
+        a power state invented from nothing, the Supreme Overlord shape with
+        a number attached. Baton Pass / Psych Up hand-offs the footer can't
+        see are escaped by name."""
+        m = self._STAGE_CLAIM.search(line)
+        if not m:
+            return False
+        if self._STAGE_NOT_NOW.search(self._claim_sentence(line, m.start())):
+            return False
+        text = (item.get("text") or "").lower()
+        return not any(w in text for w in self._STAGE_SUPPORT)
+
     @staticmethod
     def _miss_for_immunity(line: str, item: dict) -> bool:
         """True when the line narrates a no-effect as a miss/dodge — three
@@ -1633,6 +1739,47 @@ class Caster:
                         line = retry
                 except Exception:
                     pass
+            # field-state guards: weather/screens/stage claims the record
+            # doesn't support anywhere in the beat; regen with the rule
+            if line and self._weather_state_claim(line, item):
+                try:
+                    raw = await asyncio.to_thread(
+                        self._generate_sync, persona, item,
+                        "Do NOT narrate active weather — the beat reports "
+                        "none of the weather you named. Past or hypothetical "
+                        "weather must be clearly marked as past or "
+                        "hypothetical. React to what the beat actually "
+                        "reports.")
+                    retry = _clean(raw)
+                    if retry and not self._weather_state_claim(retry, item):
+                        line = retry
+                except Exception:
+                    pass
+            if line and self._screens_state_claim(line, item):
+                try:
+                    raw = await asyncio.to_thread(
+                        self._generate_sync, persona, item,
+                        "Do NOT say screens are up — the beat reports no "
+                        "Reflect, Light Screen or Aurora Veil active on "
+                        "either side. React to what the beat actually "
+                        "reports.")
+                    retry = _clean(raw)
+                    if retry and not self._screens_state_claim(retry, item):
+                        line = retry
+                except Exception:
+                    pass
+            if line and self._boost_state_claim(line, item):
+                try:
+                    raw = await asyncio.to_thread(
+                        self._generate_sync, persona, item,
+                        "Do NOT state a stat-stage number like +2 — the "
+                        "beat reports no active stat boosts. State only "
+                        "what the beat reports.")
+                    retry = _clean(raw)
+                    if retry and not self._boost_state_claim(retry, item):
+                        line = retry
+                except Exception:
+                    pass
             # miss-for-immunity guard: a no-effect narrated as a miss/dodge
             # corrupts both the luck ledger and the mechanics (3 sightings
             # in one hunt); regen once with the distinction spelled out
@@ -1790,6 +1937,12 @@ class Caster:
                      lambda: self._miss_for_immunity(line, item)),
                     ("overlord state claim",
                      lambda: self._overlord_state_claim(line, item)),
+                    ("weather state claim",
+                     lambda: self._weather_state_claim(line, item)),
+                    ("screens state claim",
+                     lambda: self._screens_state_claim(line, item)),
+                    ("boost state claim",
+                     lambda: self._boost_state_claim(line, item)),
                     ("fabricated recoil",
                      lambda: self._fabricated_recoil(line, item)),
                     ("fabricated synergy",
