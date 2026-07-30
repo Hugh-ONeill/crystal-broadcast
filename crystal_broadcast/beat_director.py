@@ -128,6 +128,12 @@ def _poke_name(token: str) -> str:
     return token.split(": ", 1)[1] if ": " in token else token
 
 
+def _squash(s: str) -> str:
+    """Case/punctuation-blind species comparison key — protocol details,
+    poke-env display names and prose all format forms differently."""
+    return re.sub(r"[^a-z0-9]", "", s.lower())
+
+
 def _ordinal(n: int) -> str:
     return {1: "first", 2: "second", 3: "third", 4: "fourth", 5: "fifth",
             6: "sixth", 7: "seventh", 8: "eighth"}.get(n, f"{n}th")
@@ -1721,6 +1727,17 @@ class Director:
         # (side, mon) whose current sleep is a deliberate Rest — the
         # escalating-affliction callback must not grieve over a chosen recovery
         self._rest_sleepers: set = set()
+        # Field state reconstructed from observed Events (the director never
+        # sees raw protocol): weather label, screens per side, stat stages per
+        # (side, mon). Surfaced as a state footer in the beat text so claims
+        # about weather/screens/boosts become checkable facts of record — the
+        # Supreme Overlord lesson generalized. Our own voluntary switches emit
+        # no Event, so stale boosts are handled at compose time by only
+        # surfacing the CURRENT actives' stages (ctx names them every beat).
+        self._weather: str | None = None
+        self._screens: dict = {"us": set(), "them": set()}
+        self._boosts: dict = {}
+        self._prev_actives: tuple = (None, None)
 
     # A mon is treated as committed to one attacking stat only when the other
     # is this many times smaller. Picked from the actual dex, not by feel: the
@@ -1818,10 +1835,64 @@ class Director:
             return atk / spa >= self.STAT_COMMITMENT_RATIO
         return spa / atk >= self.STAT_COMMITMENT_RATIO
 
+    def _track_field(self, ev: Event):
+        """Fold one Event into the reconstructed field state. Kept
+        deliberately lossy in the SILENT direction: anything ambiguous
+        (invertboost's flip, White Herb's -clearnegativeboost which emits no
+        Event, a Baton Pass hand-off) drops or misses entries rather than
+        keeping wrong ones — an absent footer line makes the guards pass,
+        a wrong one would make the record itself lie."""
+        t = ev.type
+        if t == "weather_set":
+            self._weather = ev.data.get("weather") or self._weather
+        elif t == "weather_cleared":
+            self._weather = None
+        elif t == "screens_set":
+            cond = ev.data.get("condition")
+            if ev.side in self._screens and cond:
+                self._screens[ev.side].add(cond)
+        elif t in ("screens_wore_off", "side_cleared"):
+            cond = (ev.data.get("condition") or "")
+            if ev.side in self._screens and cond.lower() in _SCREENS:
+                self._screens[ev.side].discard(cond)
+        elif t == "hazard_flip":
+            # Court Change: screens change sides wholesale
+            self._screens["us"], self._screens["them"] = (
+                self._screens["them"], self._screens["us"])
+        elif t in ("boost", "unboost"):
+            mon, stat = ev.data.get("mon"), ev.data.get("stat")
+            if mon and stat:
+                st = self._boosts.setdefault((ev.side, mon), {})
+                if ev.data.get("maxed"):
+                    st[stat] = 6
+                else:
+                    amt = ev.data.get("amount") or 0
+                    delta = amt if t == "boost" else -amt
+                    st[stat] = max(-6, min(6, st.get(stat, 0) + delta))
+                if not st[stat]:
+                    del st[stat]
+        elif t == "boosts_cleared":
+            # covers -clearboost / -clearallboost / -invertboost; a bare
+            # Haze arrives sideless and wipes both actives
+            if ev.side in ("us", "them"):
+                for key in [k for k in self._boosts if k[0] == ev.side]:
+                    del self._boosts[key]
+            else:
+                self._boosts.clear()
+        elif t == "ko":
+            target = ev.data.get("target")
+            if target:
+                self._boosts.pop((ev.side, target), None)
+        elif t in ("opp_switch", "forced_switch"):
+            prev = ev.data.get("prev")
+            if prev:
+                self._boosts.pop((ev.side, prev), None)
+
     # --- ingestion -----------------------------------------------------
     def observe(self, events: list[Event]):
         for ev in events:
             self._pending.append(ev)
+            self._track_field(ev)
             # the event still rides along in the turn's prose; it just no
             # longer COMPELS a turn to be spoken on its own
             if ev.notable and not self._cosmetic_stat_change(ev):
@@ -1888,6 +1959,22 @@ class Director:
 
     # --- the per-decision call ------------------------------------------
     def decide(self, ctx: TurnContext) -> Decision:
+        # Retire the outgoing active's stat stages the moment ctx names a
+        # different mon — our own voluntary switches emit no Event, and the
+        # compose-time actives filter alone would resurrect dead boosts when
+        # the mon re-enters later. Runs before ANY gating so silent decisions
+        # still keep the ledger honest. (A Baton Pass hand-off stays
+        # invisible and merely understates — the safe direction.)
+        for bside, cur, prev in (("us", ctx.me_name, self._prev_actives[0]),
+                                 ("them", ctx.opp_name,
+                                  self._prev_actives[1])):
+            if prev and cur and _squash(prev) != _squash(cur):
+                for key in [k for k in self._boosts
+                            if k[0] == bside and _squash(k[1]) == _squash(prev)]:
+                    del self._boosts[key]
+        self._prev_actives = (ctx.me_name or self._prev_actives[0],
+                              ctx.opp_name or self._prev_actives[1])
+
         swing = (None if self._prev_value is None
                  else ctx.value - self._prev_value)
         new_ours = ctx.ours_fainted - self._prev_fainted[0]
@@ -1959,9 +2046,6 @@ class Director:
 
         # KOs are normally narrated in the highlights above; only fall back
         # to a flat mention for a faint that didn't make the play-by-play
-        def _squash(s):
-            return re.sub(r"[^a-z0-9]", "", s.lower())
-
         def _ko_narrated(name):
             n = _squash(name)
             for ev in self._pending:
@@ -1999,6 +2083,36 @@ class Director:
             parts.append(f"Desk read: {read}{', ' + sw if sw else ''}.")
         parts.append(f"Bodies: us {6 - len(ctx.ours_fainted)} standing, "
                      f"them {6 - len(ctx.theirs_fainted)}.")
+
+        # ---- field-state footer: the "Bodies:" contract extended — present
+        # every beat it holds, terse, regular enough for the caster's state
+        # guards to parse, and absent entirely when nothing is up (the common
+        # early-game case). Boosts surface for the CURRENT actives only: our
+        # own voluntary switches emit no Event, so a benched mon's stale
+        # stages must never reach the record — ctx names the actives fresh
+        # every beat, which makes the filter self-correcting.
+        if self._weather:
+            parts.append(f"Weather: {self._weather}.")
+        scr = []
+        if self._screens["us"]:
+            scr.append("our " + " and ".join(sorted(self._screens["us"])))
+        if self._screens["them"]:
+            scr.append("their " + " and ".join(sorted(self._screens["them"])))
+        if scr:
+            parts.append("Screens: " + "; ".join(scr) + ".")
+        stages = []
+        for bside, active in (("us", ctx.me_name), ("them", ctx.opp_name)):
+            if not active:
+                continue
+            st = next((v for (s, m), v in self._boosts.items()
+                       if s == bside and _squash(m) == _squash(active)), None)
+            if st:
+                frag = ", ".join(
+                    f"{v:+d} {_STAT.get(k, k)}" for k, v in sorted(st.items()))
+                poss = "our" if bside == "us" else "their"
+                stages.append(f"{poss} {active} {frag}")
+        if stages:
+            parts.append("Boosts: " + "; ".join(stages) + ".")
 
         # board-vs-desk disagreement: the flagship beat, said once per
         # onset — phrased as plain feed copy, never a labelled "Note:"

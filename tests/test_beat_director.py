@@ -1549,3 +1549,128 @@ def test_ko_binds_when_self_effects_flush_the_move():
     assert kos[0].prose == ("their Great Tusk's Headlong Rush knocked out "
                             "Kommo-o")
     assert kos[0].data["move"] == "Headlong Rush"
+
+
+# --- field-state footer (weather / screens / boosts) -----------------------
+
+def test_field_state_footer_from_events():
+    """The Bodies: contract extended: weather, screens and current-active
+    boosts reconstructed from observed events surface as a footer the
+    caster's state guards can check claims against."""
+    d = Director()
+    d.observe([
+        Event("weather_set",
+              "their Ninetales's Drought ability set harsh sun up",
+              notable=True,
+              data={"weather": "harsh sun", "user": "Ninetales"}),
+        Event("screens_set", "their Grimmsnarl put Reflect up on their side",
+              side="them", data={"condition": "Reflect",
+                                 "user": "Grimmsnarl"}),
+        Event("boost",
+              "our Kingambit sharply raised its Attack with Swords Dance",
+              side="us", notable=True,
+              data={"mon": "Kingambit", "stat": "atk", "amount": 2,
+                    "cause": "Swords Dance"}),
+    ])
+    dec = d.decide(_ctx(turn=7, me_name="Kingambit", me_hp=88,
+                        opp_name="Grimmsnarl", opp_hp=100))
+    assert "Weather: harsh sun." in dec.text
+    assert "Screens: their Reflect." in dec.text
+    assert "Boosts: our Kingambit +2 Attack." in dec.text
+
+
+def test_field_state_footer_absent_when_nothing_up():
+    d = Director()
+    dec = d.decide(_ctx(turn=3))
+    for label in ("Weather:", "Screens:", "Boosts:"):
+        assert label not in dec.text
+
+
+def test_field_state_footer_clears():
+    """weather_cleared / screens_wore_off / a sideless boosts_cleared (Haze)
+    empty the footer again."""
+    d = Director()
+    d.observe([
+        Event("weather_set", "rain set in", notable=True,
+              data={"weather": "rain"}),
+        Event("screens_set", "Light Screen went up on our side", side="us",
+              data={"condition": "Light Screen"}),
+        Event("boost", "our Gliscor raised its Speed", side="us",
+              notable=True,
+              data={"mon": "Gliscor", "stat": "spe", "amount": 1}),
+    ])
+    dec = d.decide(_ctx(turn=4))
+    assert "Weather: rain." in dec.text
+    assert "Screens: our Light Screen." in dec.text
+    assert "Boosts: our Gliscor +1 Speed." in dec.text
+    d.observe([
+        Event("weather_cleared", "the weather cleared", notable=True),
+        Event("screens_wore_off", "our Light Screen wore off", side="us",
+              data={"condition": "Light Screen"}),
+        Event("boosts_cleared", "every stat change was wiped away",
+              notable=True),
+    ])
+    dec2 = d.decide(_ctx(turn=6))
+    for label in ("Weather:", "Screens:", "Boosts:"):
+        assert label not in dec2.text
+
+
+def test_boost_stages_accumulate_and_retire_on_switch():
+    """+1 twice reads +2; a mon that switches out (event-less for our own
+    side) must neither display while benched nor resurface dead stages when
+    it re-enters later — ctx naming a new active retires them."""
+    d = Director()
+    d.observe([Event("boost", "our Kingambit raised its Attack", side="us",
+                     notable=True,
+                     data={"mon": "Kingambit", "stat": "atk", "amount": 1}),
+               Event("boost", "our Kingambit raised its Attack", side="us",
+                     notable=True,
+                     data={"mon": "Kingambit", "stat": "atk", "amount": 1})])
+    dec = d.decide(_ctx(turn=4, me_name="Kingambit"))
+    assert "Boosts: our Kingambit +2 Attack." in dec.text
+    dec2 = d.decide(_ctx(turn=5, me_name="Gliscor"))
+    assert "Boosts:" not in dec2.text
+    dec3 = d.decide(_ctx(turn=8, me_name="Kingambit"))
+    assert "Boosts:" not in dec3.text
+
+
+def test_their_boosts_clear_on_their_switch():
+    d = Director()
+    d.observe([Event("boost", "their Volcarona raised its Special Attack",
+                     side="them", notable=True,
+                     data={"mon": "Volcarona", "stat": "spa", "amount": 1})])
+    dec = d.decide(_ctx(turn=4, opp_name="Volcarona"))
+    assert "Boosts: their Volcarona +1 Special Attack." in dec.text
+    d.observe([Event("opp_switch", "they go to Heatran", side="them",
+                     data={"mon": "Heatran", "prev": "Volcarona"})])
+    dec2 = d.decide(_ctx(turn=5, opp_name="Heatran"))
+    assert "Boosts:" not in dec2.text
+
+
+def test_court_change_swaps_screens_sides():
+    d = Director()
+    d.observe([Event("screens_set", "their Grimmsnarl put Reflect up on "
+                     "their side", side="them",
+                     data={"condition": "Reflect"}),
+               Event("hazard_flip", "Court Change swapped the hazards and "
+                     "screens onto the opposite sides", notable=True)])
+    dec = d.decide(_ctx(turn=6))
+    assert "Screens: our Reflect." in dec.text
+
+
+def test_field_footer_end_to_end_from_protocol():
+    """Scanner -> Director round trip: raw -weather / -sidestart lines end
+    up in the footer with display labels and the right possessives."""
+    sc = ProtocolScanner()
+    d = Director()
+    evs = sc.scan([
+        ["", "switch", "p1a: Ninetales", "Ninetales, F", "100/100"],
+        ["", "switch", "p2a: Grimmsnarl", "Grimmsnarl, M", "100/100"],
+        ["", "-weather", "SunnyDay", "[from] ability: Drought",
+         "[of] p1a: Ninetales"],
+        ["", "-sidestart", "p2: someone", "Reflect"],
+    ], role="p2")
+    d.observe(evs)
+    dec = d.decide(_ctx(turn=2, me_name="Grimmsnarl", opp_name="Ninetales"))
+    assert "Weather: harsh sun." in dec.text
+    assert "Screens: our Reflect." in dec.text
