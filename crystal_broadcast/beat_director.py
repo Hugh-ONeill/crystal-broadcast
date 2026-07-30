@@ -523,7 +523,12 @@ class ProtocolScanner:
         holder = next((e.split("]", 1)[1].strip() for e in trailing
                        if e.startswith("[of]") and "]" in e), None)
         if abil:
-            return (f"{qual(holder)}'s {abil}" if holder else abil), abil
+            # "ability" said out loud: "their Ninetales's Drought set harsh
+            # sun up" reads as a play the opponent MADE, and the same slot
+            # produced "Zapdos clicked Static" — an ability proc is a device
+            # firing, so label it one
+            return ((f"{qual(holder)}'s {abil} ability" if holder
+                     else f"the {abil} ability"), abil)
         lm = self._last_move
         if lm:
             return lm[0], lm[1]
@@ -868,12 +873,19 @@ class ProtocolScanner:
                         # move making contact. Active voice ("Flame Body
                         # burned X") reads as the opponent acting, so go
                         # passive and attribute the ability to its holder.
+                        # Round 2 (user-reported): even passive "by X's
+                        # Static" leaves an agent slot, and FRACTURE upgraded
+                        # it to "Zapdos clicked Static". So say ABILITY out
+                        # loud and use a proc verb — a device that went off
+                        # has no click to claim.
                         holder = next(
                             (e.split("]", 1)[1].strip() for e in sm[4:]
                              if e.startswith("[of]") and "]" in e), None)
-                        src = f"{qual(holder)}'s {abil}" if holder else abil
+                        src = (f"{qual(holder)}'s {abil}" if holder
+                               else f"the {abil}")
                         prose = (_STATUS_INFLICT_PASSIVE[sm[3]]
-                                 .format(n=qual(sm[2])) + f" by {src}")
+                                 .format(n=qual(sm[2]))
+                                 + f" — {src} ability went off")
                     else:
                         prose = tmpl.format(n=qual(sm[2]))
                         if cause:
@@ -1024,8 +1036,12 @@ class ProtocolScanner:
                                if e.startswith("[of]") and "]" in e), None)
                 lm = self._last_move
                 if abil:
-                    src = f"{qual(holder)}'s {abil}" if holder else abil
-                    prose = f"{mon_q}'s {stat} was {adv}raised by {src}"
+                    # "raised by {Abil}" leaves the same clickable agent slot
+                    # as the Static status read — mark it as an ability proc
+                    src = (f"{qual(holder)}'s {abil}" if holder
+                           else f"its {abil}")
+                    prose = (f"{mon_q}'s {stat} was {adv}raised — "
+                             f"{src} ability kicked in")
                     cause = abil
                 elif lm and lm[0] == mon:
                     prose = f"{mon_q} {adv}raised its {stat} with {lm[1]}"
@@ -1054,8 +1070,11 @@ class ProtocolScanner:
                                if e.startswith("[of]") and "]" in e), None)
                 lm = self._last_move
                 if abil:
-                    src = f"{qual(holder)}'s {abil}" if holder else abil
-                    prose = f"{mon_q}'s {stat} was {adv}cut by {src}"
+                    # same ability-proc marking as the boost branch above
+                    src = (f"{qual(holder)}'s {abil}" if holder
+                           else f"its {abil}")
+                    prose = (f"{mon_q}'s {stat} was {adv}cut — "
+                             f"{src} ability went off")
                     cause = abil
                 elif lm and lm[0] == mon:
                     prose = (f"{mon_q} {adv}dropped its own {stat} "

@@ -640,7 +640,12 @@ def test_ability_triggered_status_is_passive_and_credits_the_holder():
     """Regression (live 2026-07-27): the active template put the ability in
     the subject slot ('Flame Body burned our Zamazenta'), and FRACTURE read
     that as the opponent acting: 'Moltres just used Flame Body to torch my
-    Zamazenta'. Flame Body is a passive that fired off OUR OWN contact move."""
+    Zamazenta'. Flame Body is a passive that fired off OUR OWN contact move.
+
+    Round 2 (take 27 era, user-reported): even the passive 'by Moltres's
+    Flame Body' left an agent slot, and FRACTURE upgraded a Static proc to
+    'Zapdos clicked Static'. The prose now says ABILITY out loud with a proc
+    verb — a device that went off has no click to claim."""
     sc = ProtocolScanner()
     evs = sc.scan([
         ["", "move", "p1a: Zamazenta", "Close Combat", "p2a: Moltres"],
@@ -651,9 +656,9 @@ def test_ability_triggered_status_is_passive_and_credits_the_holder():
     st = [e for e in evs if e.type == "status_applied"]
     assert len(st) == 1
     prose = st[0].prose
-    assert "was burned by" in prose            # passive, not "Flame Body burned"
+    assert "was burned" in prose               # passive, not "Flame Body burned"
     assert not prose.startswith("Flame Body")
-    assert "Moltres's Flame Body" in prose     # credited to its holder
+    assert "Moltres's Flame Body ability went off" in prose  # a proc, not a play
     assert st[0].data["cause"] == "Flame Body"  # data unchanged for the caster
 
 
