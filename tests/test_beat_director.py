@@ -862,12 +862,14 @@ def test_a_miss_names_who_dodged():
 
 
 def test_untagged_drop_with_no_known_move_stays_neutral():
-    """No cause available: keep the old passive wording rather than invent an
-    actor. Never guess agency."""
+    """No cause available: keep the passive wording rather than invent an
+    actor — never guess agency. The SUBJECT is still side-marked (take 30:
+    four unmarked Calm Mind beats became 'THEY CLICKED CALM MIND ON THE
+    IRON CROWN', ours); whose stat it is was never in doubt, only who did it."""
     sc = ProtocolScanner()
     evs = sc.scan([["", "-unboost", "p1a: Gliscor", "spe", "1"]], role="p1")
     ub = [e for e in evs if e.type == "unboost"][0]
-    assert ub.prose == "Gliscor's Speed was cut"
+    assert ub.prose == "our Gliscor's Speed was cut"
     assert ub.data["cause"] is None
 
 
@@ -1478,3 +1480,25 @@ def test_cant_move_shares_the_ledger_but_recharge_does_not():
     evs = sc.scan([["", "cant", "p1a: Kommo-o", "recharge"]], role="p1")
     r = [e for e in evs if e.type == "cant_move"][0]
     assert "dice" not in r.prose and r.data["luck_count"] is None
+
+
+def test_boost_subject_is_always_side_marked():
+    """Take 30 T5-T8: 'Iron Crown raised its Special Attack with Calm Mind'
+    (unmarked, non-mirror) four beats running became 'THEY CLICKED CALM MIND
+    ON THE IRON CROWN' — ours. Setup is the most side-critical fact after
+    moves; mark it like moves."""
+    sc = ProtocolScanner()
+    evs = sc.scan([
+        ["", "switch", "p1a: Iron Crown", "Iron Crown", "100/100"],
+        ["", "switch", "p2a: Kingambit", "Kingambit", "100/100"],
+        ["", "move", "p1a: Iron Crown", "Calm Mind", "p1a: Iron Crown"],
+        ["", "-boost", "p1a: Iron Crown", "spa", "1"],
+        ["", "-boost", "p1a: Iron Crown", "spd", "1"],
+        ["", "move", "p2a: Kingambit", "Swords Dance", "p2a: Kingambit"],
+        ["", "-boost", "p2a: Kingambit", "atk", "2"],
+    ], role="p1")
+    boosts = [e for e in evs if e.type == "boost"]
+    assert boosts[0].prose == ("our Iron Crown raised its Special Attack "
+                               "with Calm Mind")
+    assert boosts[2].prose == ("their Kingambit sharply raised its Attack "
+                               "with Swords Dance")

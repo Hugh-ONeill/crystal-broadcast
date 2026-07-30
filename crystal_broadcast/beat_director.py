@@ -1133,7 +1133,16 @@ class ProtocolScanner:
                 # "the Attack boost from Iron Head" — Iron Head does not boost.
                 # An unattributed +2 is unanswerable even to a human reading
                 # the transcript, which is the whole point of the record.
+                # WHOSE boost, always — qual() only marks mirrors, and four
+                # unmarked "Iron Crown raised its Special Attack with Calm
+                # Mind" beats on take 30 became "THEY CLICKED CALM MIND ON
+                # THE IRON CROWN" (ours). Setup is the single most
+                # side-critical fact after moves; mark it like moves.
                 mon_q, mon = qual(sm[2]), name_of(sm[2])
+                if not mon_q.startswith(("our ", "their ")):
+                    _p = {"us": "our", "them": "their"}.get(side_of(sm[2]))
+                    if _p:
+                        mon_q = f"{_p} {mon_q}"
                 abil = _from_ability(sm[4:])
                 holder = next((e.split("]", 1)[1].strip() for e in sm[4:]
                                if e.startswith("[of]") and "]" in e), None)
@@ -1167,7 +1176,12 @@ class ProtocolScanner:
                 # opponent's Intimidate did — opposite readings, and the
                 # caster picks one. Ability causes name their holder; an
                 # untagged drop right after X's own move is self-inflicted.
+                # Subject always sided, same as the boost branch above.
                 mon_q, mon = qual(sm[2]), name_of(sm[2])
+                if not mon_q.startswith(("our ", "their ")):
+                    _p = {"us": "our", "them": "their"}.get(side_of(sm[2]))
+                    if _p:
+                        mon_q = f"{_p} {mon_q}"
                 abil = _from_ability(sm[4:])
                 holder = next((e.split("]", 1)[1].strip() for e in sm[4:]
                                if e.startswith("[of]") and "]" in e), None)
@@ -1196,9 +1210,14 @@ class ProtocolScanner:
                           "amount": amt, "cause": cause}))
             elif t == "-setboost" and len(sm) > 4:
                 flush()
+                _sq = qual(sm[2])
+                if not _sq.startswith(("our ", "their ")):
+                    _p = {"us": "our", "them": "their"}.get(side_of(sm[2]))
+                    if _p:
+                        _sq = f"{_p} {_sq}"
                 out.append(Event(
                     "boost",
-                    f"{qual(sm[2])} maxed out its "
+                    f"{_sq} maxed out its "
                     f"{_STAT.get(sm[3], sm[3])}",
                     side=side_of(sm[2]), notable=True,
                     data={"mon": name_of(sm[2]), "stat": sm[3],
