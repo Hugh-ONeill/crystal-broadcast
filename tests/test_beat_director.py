@@ -1325,3 +1325,92 @@ def test_tailwind_names_the_setter():
     tw = [e for e in evs if e.type == "tailwind_up"]
     assert tw
     assert tw[0].prose == "our Zapdos set Tailwind for our side"
+
+
+# --- take 28 audit fixes: fails, status causes, residual windows, switches --
+
+def test_failed_move_is_narrated():
+    """Five silent fails in take 28's endgame; PRISM invented 'The Sucker
+    Punch connects' into the gap. A fail is a fact — say it."""
+    sc = ProtocolScanner()
+    evs = sc.scan([
+        ["", "switch", "p1a: Kingambit", "Kingambit", "100/100"],
+        ["", "switch", "p2a: Cinderace", "Cinderace", "100/100"],
+        ["", "move", "p1a: Kingambit", "Sucker Punch", "p2a: Cinderace"],
+        ["", "-fail", "p1a: Kingambit"],
+    ], role="p1")
+    fails = [e for e in evs if e.type == "move_failed"]
+    assert fails
+    assert fails[0].prose == ("our Kingambit's Sucker Punch failed "
+                              "against their Cinderace")
+
+
+def test_residual_burn_damage_not_credited_to_a_failed_move():
+    """Take 28 T27/T30: Will-O-Wisp FAILED (already burned), then end-of-turn
+    burn chip landed in its damage window and aired as 'Will-O-Wisp hit our
+    Kingambit — barely a scratch'. [from]-tagged damage is never the move's."""
+    sc = ProtocolScanner()
+    evs = sc.scan([
+        ["", "switch", "p1a: Kingambit", "Kingambit", "100/100"],
+        ["", "switch", "p2a: Cinderace", "Cinderace", "100/100"],
+        ["", "move", "p2a: Cinderace", "Will-O-Wisp", "p1a: Kingambit"],
+        ["", "-fail", "p1a: Kingambit", "brn"],
+        ["", "-heal", "p1a: Kingambit", "24/100 brn",
+         "[from] item: Leftovers"],
+        ["", "-damage", "p1a: Kingambit", "18/100 brn", "[from] brn"],
+    ], role="p1")
+    fails = [e for e in evs if e.type == "move_failed"]
+    assert fails and fails[0].prose == ("their Cinderace's Will-O-Wisp "
+                                        "failed against our Kingambit")
+    assert not [e for e in evs if e.type == "move_hit"]
+
+
+def test_clean_status_move_names_actor_and_move():
+    """Take 28 T24: 'burned our Kingambit' — no actor, no move (a direct
+    status carries no [from] tag and a clean status move emits no event).
+    FRACTURE invented 'Flamethrower'. The last move is the cause."""
+    sc = ProtocolScanner()
+    evs = sc.scan([
+        ["", "switch", "p1a: Zamazenta", "Zamazenta", "100/100"],
+        ["", "switch", "p2a: Cinderace", "Cinderace", "100/100"],
+        ["", "move", "p2a: Cinderace", "Will-O-Wisp", "p1a: Zamazenta"],
+        ["", "-status", "p1a: Zamazenta", "brn"],
+    ], role="p1")
+    st = [e for e in evs if e.type == "status_applied"]
+    assert st
+    assert st[0].prose == ("their Cinderace's Will-O-Wisp burned Zamazenta")
+
+
+def test_their_switch_is_narrated_ours_is_not():
+    """Take 28 T11: their Great Tusk appeared board-only and FRACTURE said
+    'THEY BROUGHT IN IRON TREADS' — ours. Their replacements get an event;
+    our chosen switches stay with the decision prose; leads stay quiet."""
+    sc = ProtocolScanner()
+    evs = sc.scan([
+        # leads — no events
+        ["", "switch", "p1a: Kyurem", "Kyurem", "100/100"],
+        ["", "switch", "p2a: Kingambit", "Kingambit", "100/100"],
+        # their replacement — narrated
+        ["", "switch", "p2a: Great Tusk", "Great Tusk", "78/100"],
+        # our switch — NOT narrated here (decision prose covers it)
+        ["", "switch", "p1a: Iron Treads", "Iron Treads", "100/100"],
+    ], role="p1")
+    sw = [e for e in evs if e.type == "opp_switch"]
+    assert len(sw) == 1
+    assert sw[0].prose == "they go to Great Tusk"
+    assert sw[0].data["prev"] == "Kingambit"
+
+
+def test_drag_is_narrated_for_both_sides():
+    sc = ProtocolScanner()
+    evs = sc.scan([
+        ["", "switch", "p1a: Kyurem", "Kyurem", "100/100"],
+        ["", "switch", "p2a: Zapdos", "Zapdos", "100/100"],
+        ["", "drag", "p1a: Kommo-o", "Kommo-o", "100/100"],
+        ["", "drag", "p2a: Kyurem", "Kyurem", "100/100"],
+    ], role="p1")
+    forced = [e for e in evs if e.type == "forced_switch"]
+    assert [e.prose for e in forced] == [
+        "we were dragged out — Kommo-o is in",
+        "they were dragged out — their Kyurem is in",
+    ]

@@ -657,6 +657,18 @@ class ProtocolScanner:
             mover_side = cur.get("mover_side")
             target_side = ({"us": "them", "them": "us"}.get(mover_side)
                            if mover_side else None)
+            if cur.get("failed"):
+                # factual, no speculation about WHY — Sucker Punch reads and
+                # burn immunities are the desk's job to reason about, and now
+                # they have a fact to reason FROM instead of a silence
+                fail = f"{head} failed"
+                if target_disp and target_disp != mover_disp:
+                    fail += f" against {target_disp}"
+                out.append(Event("move_failed", fail, side=mover_side,
+                                 data={"mover": cur["mover"],
+                                       "move": cur["move"]}))
+                cur = None
+                return
             if cur.get("missed"):
                 # name the target, same rule as the hit and ko branches: a
                 # miss with no victim leaves the caster to guess who dodged
@@ -831,11 +843,29 @@ class ProtocolScanner:
                                   "cause": cause, "hp": frac}))
                 if frac is not None:
                     self._hp[key] = frac
+                # [from]-tagged damage is residual (burn, poison, an item),
+                # never the pending move's own hit — direct move damage
+                # carries no tag. Without this, take 28's end-of-turn burn
+                # chip landed inside a FAILED Will-O-Wisp's window and aired
+                # as "Will-O-Wisp hit our Kingambit — barely a scratch".
                 if (t == "-damage" and cur and old is not None
-                        and frac is not None and cur.get("target_pos")
+                        and frac is not None and not src
+                        and cur.get("target_pos")
                         and cur["target_pos"].split(":")[0]
                         == sm[2].split(":")[0]):
                     cur["dmg"] = old - frac
+            elif t == "-fail" and len(sm) > 2:
+                # A failed move previously emitted NOTHING — no damage, no
+                # tags, no event — and five silent fails across take 28's
+                # endgame (Sucker Punch into no attack, Will-O-Wisp into an
+                # already-burned target) had PRISM inventing outcomes into
+                # the gap ("The Sucker Punch connects" — it did not). The
+                # token is the mover on a bare fail and the target on an
+                # action fail, so accept either; flush() narrates it.
+                if cur and cur.get("move"):
+                    who = name_of(sm[2])
+                    if who in (cur.get("mover"), cur.get("target")):
+                        cur["failed"] = True
             elif t == "poke" and len(sm) > 3:
                 # team preview ('|poke|p1|Clefable, M|item'): seed both rosters
                 # so a species shared by both teams reads as a mirror MATCH
@@ -844,11 +874,37 @@ class ProtocolScanner:
                     sm[3].split(",")[0])
             elif t in ("switch", "drag"):
                 key = sm[2].split(":")[0]
+                prev_species = self._species.get(key)
                 self._hp[key] = (_hp_frac(sm[4]) if len(sm) > 4 else 1.0)
                 if len(sm) > 3 and sm[3]:
                     species = sm[3].split(",")[0]
                     self._species[key] = species
                     self._team_species.setdefault(key[:2], set()).add(species)
+                    # Narrate THEIR switch-ins. Ours are already spoken for
+                    # ("We switch to X" decision prose, "we send X in" on
+                    # replacements) but the opponent's just materialised in
+                    # the board line — and into that silence, take 28 T11:
+                    # "THEY BROUGHT IN IRON TREADS" (ours). A slot that
+                    # already held a species marks a real replacement, so
+                    # the lead reveal stays quiet and role=None fixtures are
+                    # byte-unchanged. Drags are narrated for BOTH sides —
+                    # a phazed mon is an event no one chose.
+                    s = side_of(sm[2])
+                    if prev_species and prev_species != species and s:
+                        if t == "drag":
+                            flush()
+                            poss = "we were" if s == "us" else "they were"
+                            out.append(Event(
+                                "forced_switch",
+                                f"{poss} dragged out — {qual(sm[2])} is in",
+                                side=s,
+                                data={"mon": species, "prev": prev_species}))
+                        elif s == "them":
+                            flush()
+                            out.append(Event(
+                                "opp_switch", f"they go to {qual(sm[2])}",
+                                side="them",
+                                data={"mon": species, "prev": prev_species}))
             elif t == "faint" and len(sm) > 2:
                 mon = name_of(sm[2])
                 if cur and cur.get("target") == mon:
@@ -868,6 +924,19 @@ class ProtocolScanner:
                     flush()  # emit the causing move first, then its effect
                     cause = _status_cause(sm[4:])
                     abil = _from_ability(sm[4:])
+                    if not cause and not abil:
+                        # A status straight off a move carries NO [from] tag,
+                        # and a clean status move emits no move event either
+                        # (events fire on damage/tags/KO) — so take 28 T24
+                        # aired "burned our Kingambit" with no actor and no
+                        # move, and FRACTURE invented "Flamethrower" for a
+                        # mon that doesn't carry it. The causing move is the
+                        # one flush() just parked in _last_move.
+                        lm = self._last_move
+                        if lm and lm[0] != name_of(sm[2]):
+                            who = (sided(lm[0], lm[2])
+                                   if len(lm) > 2 and lm[2] else lm[0])
+                            cause = f"{who}'s {lm[1]}"
                     if abil and sm[3] in _STATUS_INFLICT_PASSIVE:
                         # an ability is a PASSIVE trigger, usually off our own
                         # move making contact. Active voice ("Flame Body
