@@ -87,3 +87,33 @@ def test_queued_events_do_not_advance_the_viewer():
     c = PresentationClock(max_hold=5)
     c.ingest({"kind": "queued", "line": "|turn|20", "t": 0})
     assert c.highest_turn is None
+
+
+def test_opening_line_waits_for_first_presented_event():
+    """MATCH START used to bypass the clock — right for text, wrong for
+    audio: the opening line aired ~20s before the recorder existed and a
+    REAL first-turn crit callout read as imagined (take 54)."""
+    import asyncio
+    clock = PresentationClock(max_hold=5.0)
+
+    async def run():
+        waiter = asyncio.create_task(clock.wait_for_first())
+        await asyncio.sleep(0.05)
+        assert not waiter.done()          # nothing presented yet: held
+        clock.ingest({"kind": "presented", "line": "|start"})
+        held = await asyncio.wait_for(waiter, 2)
+        assert held >= 0.05               # released by the first event
+        # second opening on a live feed releases instantly
+        assert await clock.wait_for_first() < 0.05
+
+    asyncio.run(run())
+
+
+def test_feed_loss_resets_the_camera_gate():
+    """Between takes the clock service restarts; a stale seen_any from the
+    LAST viewer must not release the NEXT take's opening line early."""
+    clock = PresentationClock(max_hold=5.0)
+    clock.ingest({"kind": "presented", "line": "|turn|3"})
+    assert clock.seen_any
+    clock._feed_lost()
+    assert not clock.seen_any

@@ -45,6 +45,9 @@ class PresentationClock:
         self.highest_turn: int | None = None
         self.ended = False
         self.connected = False
+        # has the CURRENT viewer presented anything at all — the
+        # camera-rolling gate for the opening line (see wait_for_first)
+        self.seen_any = False
         self.holds = 0
         self.held_seconds = 0.0
         self.timeouts = 0
@@ -57,6 +60,10 @@ class PresentationClock:
         is testable without a network."""
         if ev.get("kind") != "presented":
             return
+        # any presented line proves a viewer exists and is rendering
+        if not self.seen_any:
+            self.seen_any = True
+            self._wake()
         line = ev.get("line") or ""
         if line.startswith("|turn|"):
             try:
@@ -96,10 +103,17 @@ class PresentationClock:
                 raise
             except Exception:
                 pass
-            self.connected = False
-            self._wake()   # unblock anyone waiting on a feed that just died
+            self._feed_lost()
             await asyncio.sleep(backoff)
             backoff = min(backoff * 2, 5.0)
+
+    def _feed_lost(self):
+        """The clock socket dropped — between takes the clock service is
+        restarted, so a stale seen_any from the LAST take's viewer must not
+        release the NEXT take's opening line early."""
+        self.connected = False
+        self.seen_any = False
+        self._wake()   # unblock anyone waiting on a feed that just died
 
     def start(self):
         self._task = asyncio.create_task(self._run())
@@ -113,6 +127,33 @@ class PresentationClock:
             self._task = None
 
     # --- the gate ------------------------------------------------------
+    async def wait_for_first(self) -> float:
+        """Block until the viewer has presented ANYTHING — the camera gate
+        for the opening line. MATCH START used to bypass the clock ("goes
+        out at once"), which was right for text and wrong for audio: the
+        engine starts the game ~20s before the frame and recorder exist, so
+        the opening line was spoken into footage that never made the video —
+        and a REAL first-turn crit callout read as an imagined one because
+        its referent was sliced off the head (user-caught, take 54). Capped
+        by max_hold like every hold: a closed page must not mute the desk."""
+        start = time.monotonic()
+        while not self.seen_any:
+            waited = time.monotonic() - start
+            if waited >= self.max_hold:
+                self.timeouts += 1
+                print(f"pts: opening hold timed out after {waited:.1f}s — "
+                      f"publishing anyway", flush=True)
+                break
+            with contextlib.suppress(asyncio.TimeoutError):
+                await asyncio.wait_for(
+                    self._pulse.wait(),
+                    timeout=min(1.0, self.max_hold - waited))
+        held = time.monotonic() - start
+        if held > 0.05:
+            self.holds += 1
+            self.held_seconds += held
+        return held
+
     def reached(self, turn: int | None) -> bool:
         if turn is None:
             return True

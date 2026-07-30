@@ -1767,9 +1767,17 @@ class Caster:
             # the battle to be presented, or it spoils the finish while the
             # audience is still watching the last exchange.
             if self.pts is not None:
-                held = await self.pts.wait_for(
-                    _turn_of(item["text"]),
-                    final=item["text"].startswith("[RESULT]"))
+                if item["text"].startswith("[MATCH START]"):
+                    # the camera gate: the engine starts ~20s before the
+                    # frame and recorder exist, and an opening line spoken
+                    # then is sliced off the video (take 54: a REAL crit
+                    # callout read as imagined because its referent never
+                    # aired)
+                    held = await self.pts.wait_for_first()
+                else:
+                    held = await self.pts.wait_for(
+                        _turn_of(item["text"]),
+                        final=item["text"].startswith("[RESULT]"))
                 if held > 0.05:
                     self._pace_stats["pts_held_s"].append(held)
             await self.publish(item["text"], persona, line, item["hud"],
