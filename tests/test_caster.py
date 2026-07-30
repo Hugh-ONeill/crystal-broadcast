@@ -1394,3 +1394,42 @@ def test_miss_for_immunity_detection():
     assert not c._miss_for_immunity(
         "The Thunder Wave simply has no effect on a Ground type.", immune)
     assert not c._miss_for_immunity("It missed! The dice again!", real_miss)
+
+
+def test_facts_guard_double_fail_drops_the_line():
+    """User call 2026-07-30: a facts-of-record guard that fails twice used
+    to air the known-false original. Silence beats fabrication — the line
+    drops with pre-flight semantics (no transcript, no trace)."""
+    c = Caster("http://unused", "test-model", expert_url=None)
+    calls = []
+
+    def fake_gen(persona, item, nudge=None, temp_boost=0.0):
+        calls.append(nudge)
+        return "A BRUTAL CRIT! AND ANOTHER CRIT COMING!"   # violates twice
+
+    c._generate_sync = fake_gen
+    c._ungrounded_entity = lambda line, item: None
+    item = {"text": "[BATTLE T3] a super effective hit landed. X vs Y.",
+            "beats": [], "hud": None}
+    asyncio.run(c.speak(item))
+    assert len(calls) == 2                       # regen attempted
+    assert all("crit" not in ln.lower() for _p, ln in c.transcript)
+    assert c._drops.get("PRISM", 0) == 1         # counted like a drop
+
+
+def test_style_guard_double_fail_still_airs():
+    """A stale caption is not a lie: style guards keep the lenient
+    keep-the-original behavior."""
+    c = Caster("http://unused", "test-model", expert_url=None)
+
+    def fake_gen(persona, item, nudge=None, temp_boost=0.0):
+        return "The search is opting for Moonblast here."   # caption, twice
+
+    c._generate_sync = fake_gen
+    c._ungrounded_entity = lambda line, item: None
+    item = {"text": "[BATTLE T5] Last exchange: our Iron Valiant's Moonblast "
+                    "hit their Kyurem — a heavy hit. X vs Y. We go for "
+                    "Moonblast.",
+            "beats": [], "hud": None}
+    asyncio.run(c.speak(item))
+    assert c.transcript and "opting for" in c.transcript[-1][1]

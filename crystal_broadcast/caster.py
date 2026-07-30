@@ -1723,6 +1723,46 @@ class Caster:
                         line = retry
                 except Exception:
                     pass
+            # FACTS-OF-RECORD BACKSTOP (user call, 2026-07-30): every guard
+            # above regenerates once and, when the retry ALSO violated, used
+            # to air the original — a known-false line reaching the
+            # audience. The contract is "never invented", so on double-fail
+            # the line is dropped with pre-flight-drop semantics instead
+            # (no transcript, no ledger, no speech — no trace). Style
+            # guards (caption, opener, stall) stay lenient on purpose: a
+            # stale metaphor is not a lie.
+            if line:
+                fact_checks = (
+                    ("ungrounded entity",
+                     lambda: self._ungrounded_entity(line, item)),
+                    ("beat contradiction",
+                     lambda: self._contradicts_beat_effectiveness(line, item)),
+                    ("bad type claim",
+                     lambda: self._bad_type_claim(line, item)),
+                    ("fabricated miss",
+                     lambda: self._fabricated_miss(line, item)),
+                    ("invented hazard clear",
+                     lambda: self._fabricated_hazard_clear(line, item)),
+                    ("fabricated crit",
+                     lambda: self._fabricated_crit(line, item)),
+                    ("miss-for-immunity",
+                     lambda: self._miss_for_immunity(line, item)),
+                    ("fabricated recoil",
+                     lambda: self._fabricated_recoil(line, item)),
+                    ("fabricated synergy",
+                     lambda: self._fabricated_synergy(line, item)),
+                    ("fabricated immunity",
+                     lambda: self._fabricated_immunity(line, item)),
+                    ("stolen call",
+                     lambda: self._stolen_call(line, persona)),
+                )
+                offense = next(
+                    (name for name, chk in fact_checks if chk()), None)
+                if offense:
+                    print(f"caster: DROPPED {persona} line — {offense} "
+                          f"survived regeneration: {line[:90]!r}", flush=True)
+                    self._drops[persona] = self._drops.get(persona, 0) + 1
+                    continue
             if not line:
                 print(f"caster: {persona} line sanitized to empty, "
                       f"dropped: {raw[:90]!r}", flush=True)
