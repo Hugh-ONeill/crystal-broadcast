@@ -800,6 +800,15 @@ class Caster:
                               "it was theirs, blame THEM by name — never the "
                               "server. If it was ours and it worked, take the "
                               "credit.")
+            if "ability went off" in beat_txt:
+                # the device wording alone did not hold her: takes 48 and 49
+                # both aired "THEY CLICKED STATIC" over a beat that said the
+                # ability went off. The routing has to say it in her terms.
+                direction += (" An ABILITY went off this exchange — that is "
+                              "a trap firing, not a play: NOBODY clicked it "
+                              "and it cannot be clicked. Rage at the contact "
+                              "or the luck, never say they used or clicked "
+                              "the ability.")
         # FRACTURE fixates on one stall image; show her the ones already used
         # this match so she reaches for a new one (the reactive guard in
         # speak() is the backstop when this isn't enough)
@@ -833,13 +842,18 @@ class Caster:
                           "its result is NOT known yet. Do not say whether it "
                           "hit, missed, knocked out, or worked — react to the "
                           "decision and the position instead.")
-        elif "We go for" in (item.get("text") or ""):
+        elif ("We go for" in (item.get("text") or "")
+              or "We switch to" in (item.get("text") or "")):
             # the exchange-less gate above missed beats that carry BOTH a
             # resolved exchange and a chosen move: take 28 T28 "The Sucker
             # Punch connects" and take 30 T8 "I absolutely crushed them with
-            # it" were outcomes narrated for the 'We go for' move
-            direction += (" The 'We go for' move is our NEXT play — it has "
-                          "not happened yet. Say nothing about its outcome.")
+            # it" were outcomes narrated for the 'We go for' move. 'We
+            # switch to' is the same unresolved decision — take 48 T14 "The
+            # Great Tusk lead has been neutralized by a switch" aired before
+            # the switch had happened.
+            direction += (" The 'We go for' / 'We switch to' line is our "
+                          "NEXT play — it has not happened yet. Say nothing "
+                          "about its outcome.")
         if " failed" in (item.get("text") or ""):
             # the move_failed narration states THAT it failed; the WHY is
             # mechanics, and inventing it produced "the Sucker Punch failed
@@ -994,6 +1008,14 @@ class Caster:
         r"called\s+(?:it|that|this)|promised(?:\s+you)?)|"
         r"like\s+i\s+(?:said|told\s+you)|"
         r"i(?:'ve|\s+have)\s+been\s+saying)\b", re.I)
+    # third-person self-citation: "was predicted by the desk" (take 49 T5,
+    # about a Tera flip nobody had predicted) evades the first-person forms.
+    # Desk claims verify against BOTH voices' prior lines — the desk is
+    # either of them.
+    _DESK_CLAIM_RE = re.compile(
+        r"\b(?:(?:predicted|called|foreseen|expected)\s+by\s+the\s+desk|"
+        r"the\s+desk\s+(?:predicted|called|saw|expected)(?:\s+(?:it|this|"
+        r"that))?|as\s+the\s+desk\s+said)\b", re.I)
 
     def _stolen_call(self, line: str, persona: str) -> str | None:
         """The entity behind an 'I told you / I called it' the speaker never
@@ -1013,29 +1035,43 @@ class Caster:
         leans on — so all-caps lines match case-insensitively instead.
         Verified against the speaker's OWN lines this match (_match_lines):
         claiming a call she really made is the bit working as intended."""
-        if not self._CLAIM_RE.search(line):
+        if not (self._CLAIM_RE.search(line)
+                or self._DESK_CLAIM_RE.search(line)):
             return None
         try:
             from crystal_broadcast.game_data import DATA
             names = DATA.entity_names()
         except Exception:
             return None
-        claim_text = " ".join(
-            s for s in re.split(r"(?<=[.!?])\s+", line)
-            if self._CLAIM_RE.search(s)
+        own_prior = " ".join(self._match_lines.get(persona, ())).lower()
+        all_prior = " ".join(l for ls in self._match_lines.values()
+                             for l in ls).lower()
+        checks = []          # (claim sentence, the prior pool it must clear)
+        for s in re.split(r"(?<=[.!?])\s+", line):
             # a denial is not a claim: the loosened regex would otherwise
             # read "I never said X" as claiming X
-            and not re.search(r"\b(?:never|not)\b|n't\b", s, re.I))
-        prior = " ".join(self._match_lines.get(persona, ())).lower()
-        caps_blind = claim_text.isupper()
-        claim_low = claim_text.lower()
-        for name in names:
-            if len(name) < 4:
+            if re.search(r"\b(?:never|not)\b|n't\b", s, re.I):
                 continue
-            nl = name.lower()
-            if (nl in claim_low and (caps_blind or name in claim_text)
-                    and nl not in prior):
-                return name
+            if self._CLAIM_RE.search(s):
+                checks.append((s, own_prior))
+            elif self._DESK_CLAIM_RE.search(s):
+                checks.append((s, all_prior))
+        for sent, prior in checks:
+            caps_blind = sent.isupper()
+            low = sent.lower()
+            for name in names:
+                if len(name) < 4:
+                    continue
+                nl = name.lower()
+                if (nl in low and (caps_blind or name in sent)
+                        and nl not in prior):
+                    return name
+            # Tera tokens bind too: "the Tera Ghost flip was predicted by
+            # the desk" names no dex entity, only the tera — which is
+            # exactly as checkable against the transcript
+            for tok in re.findall(r"\btera[- ][a-z]+\b", low):
+                if tok not in prior:
+                    return tok
         return None
 
     # effectiveness vocabulary -> the multiplier the claim implies

@@ -1315,3 +1315,34 @@ def test_stolen_call_survives_her_intensifiers():
         "I never said Icicle Spear was the play!", "FRACTURE") is None
     assert c._stolen_call(
         "I didn't call that Icicle Spear, but WOW!", "FRACTURE") is None
+
+
+def test_desk_claim_checks_both_voices_and_binds_tera_tokens():
+    """Take 49 T5: 'The Tera Ghost flip was predicted by the desk' — nobody
+    had predicted it, and the sentence names no dex entity, only the tera.
+    Desk claims verify against BOTH voices; tera tokens are bindable."""
+    c = Caster("http://unused", "test-model", expert_url=None)
+    c._match_lines = {"PRISM": [], "FRACTURE": []}
+    line = ("The Tera Ghost flip was predicted by the desk. It kept their "
+            "Kingambit in the game.")
+    assert c._stolen_call(line, "PRISM") == "tera ghost"
+    # EITHER voice having called it makes the desk claim honest
+    c._match_lines["FRACTURE"] = ["Watch them go Tera Ghost here, I swear."]
+    assert c._stolen_call(line, "PRISM") is None
+
+
+def test_prompt_fences_cover_switches_and_ability_procs():
+    c = Caster("http://unused", "test-model", expert_url=None)
+    item = {"text": "[BATTLE T14] Last exchange: they go to Great Tusk. "
+                    "Kommo-o (57% hp) vs Great Tusk (100% hp). We switch to "
+                    "Iron Valiant.",
+            "beats": [], "hud": None}
+    msgs = c._prompt("PRISM", item)
+    assert "has not happened yet" in msgs[1]["content"]
+    item2 = {"text": "[BATTLE T35] Last exchange: Iron Treads was paralyzed "
+                     "— Zapdos's Static ability went off. We go for Rocks.",
+             "beats": [{"beat": "status", "persona": "gremlin",
+                        "register": "persecution", "data": {}}],
+             "hud": None}
+    msgs2 = c._prompt("FRACTURE", item2)
+    assert "NOBODY clicked it" in msgs2[1]["content"]
