@@ -1464,6 +1464,12 @@ class ProtocolScanner:
                 # user (from the move line just flushed) or the casters
                 # invent an actor — measured, twice
                 flush()
+                # the hazard ledger must swap with the field or the
+                # "had no hazards to clear" read runs on stale sides for
+                # the rest of the game (latent until a Court Change LANDS;
+                # take 72's failed one never got here)
+                self._hazards_up["p1"], self._hazards_up["p2"] = (
+                    self._hazards_up["p2"], self._hazards_up["p1"])
                 user = (self._last_move[0]
                         if self._last_move
                         and self._last_move[1] == "Court Change" else None)
@@ -1728,14 +1734,15 @@ class Director:
         # escalating-affliction callback must not grieve over a chosen recovery
         self._rest_sleepers: set = set()
         # Field state reconstructed from observed Events (the director never
-        # sees raw protocol): weather label, screens per side, stat stages per
-        # (side, mon). Surfaced as a state footer in the beat text so claims
-        # about weather/screens/boosts become checkable facts of record — the
+        # sees raw protocol): weather label, screens and hazards per side,
+        # stat stages per (side, mon). Surfaced as a state footer in the beat
+        # text so claims about it become checkable facts of record — the
         # Supreme Overlord lesson generalized. Our own voluntary switches emit
         # no Event, so stale boosts are handled at compose time by only
         # surfacing the CURRENT actives' stages (ctx names them every beat).
         self._weather: str | None = None
         self._screens: dict = {"us": set(), "them": set()}
+        self._hazards: dict = {"us": set(), "them": set()}
         self._boosts: dict = {}
         self._prev_actives: tuple = (None, None)
 
@@ -1855,10 +1862,20 @@ class Director:
             cond = (ev.data.get("condition") or "")
             if ev.side in self._screens and cond.lower() in _SCREENS:
                 self._screens[ev.side].discard(cond)
+        elif t == "hazard_set":
+            cond = ev.data.get("condition")
+            if ev.side in self._hazards and cond:
+                self._hazards[ev.side].add(cond)
+        elif t == "hazard_cleared":
+            cond = (ev.data.get("condition") or "")
+            if ev.side in self._hazards:
+                self._hazards[ev.side].discard(cond)
         elif t == "hazard_flip":
-            # Court Change: screens change sides wholesale
+            # Court Change: hazards and screens change sides wholesale
             self._screens["us"], self._screens["them"] = (
                 self._screens["them"], self._screens["us"])
+            self._hazards["us"], self._hazards["them"] = (
+                self._hazards["them"], self._hazards["us"])
         elif t in ("boost", "unboost"):
             mon, stat = ev.data.get("mon"), ev.data.get("stat")
             if mon and stat:
@@ -2100,6 +2117,14 @@ class Director:
             scr.append("their " + " and ".join(sorted(self._screens["them"])))
         if scr:
             parts.append("Screens: " + "; ".join(scr) + ".")
+        hz = []
+        if self._hazards["us"]:
+            hz.append("our side " + " and ".join(sorted(self._hazards["us"])))
+        if self._hazards["them"]:
+            hz.append("their side "
+                      + " and ".join(sorted(self._hazards["them"])))
+        if hz:
+            parts.append("Hazards: " + "; ".join(hz) + ".")
         stages = []
         for bside, active in (("us", ctx.me_name), ("them", ctx.opp_name)):
             if not active:

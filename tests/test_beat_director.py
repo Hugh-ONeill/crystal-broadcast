@@ -1674,3 +1674,42 @@ def test_field_footer_end_to_end_from_protocol():
     dec = d.decide(_ctx(turn=2, me_name="Grimmsnarl", opp_name="Ninetales"))
     assert "Weather: harsh sun." in dec.text
     assert "Screens: our Reflect." in dec.text
+
+
+def test_hazard_footer_tracks_set_flip_and_clear():
+    d = Director()
+    d.observe([Event("hazard_set", "their Ting-Lu set Stealth Rock on our "
+                     "side", side="us",
+                     data={"condition": "Stealth Rock", "user": "Ting-Lu"})])
+    dec = d.decide(_ctx(turn=3))
+    assert "Hazards: our side Stealth Rock." in dec.text
+    d.observe([Event("hazard_flip", "Court Change swapped the hazards and "
+                     "screens onto the opposite sides", notable=True)])
+    dec2 = d.decide(_ctx(turn=5))
+    assert "Hazards: their side Stealth Rock." in dec2.text
+    d.observe([Event("hazard_cleared", "their Great Tusk cleared Stealth "
+                     "Rock from their side with Rapid Spin", side="them",
+                     notable=True,
+                     data={"condition": "Stealth Rock", "by": "Rapid Spin"})])
+    dec3 = d.decide(_ctx(turn=7))
+    assert "Hazards:" not in dec3.text
+
+
+def test_court_change_swaps_scanner_hazard_ledger():
+    """The 'had no hazards to clear' read runs off _hazards_up; before this
+    fix a LANDED Court Change left the ledger on stale sides for the rest
+    of the game."""
+    sc = ProtocolScanner()
+    sc.scan([
+        ["", "switch", "p1a: Cinderace", "Cinderace, M", "100/100"],
+        ["", "switch", "p2a: Ting-Lu", "Ting-Lu", "100/100"],
+        ["", "move", "p2a: Ting-Lu", "Stealth Rock", "p1a: Cinderace"],
+        ["", "-sidestart", "p1: someone", "move: Stealth Rock"],
+    ], role="p2")
+    assert sc._hazards_up["p1"] == {"stealth rock"}
+    sc.scan([
+        ["", "move", "p1a: Cinderace", "Court Change", "p2a: Ting-Lu"],
+        ["", "-swapsideconditions"],
+    ], role="p2")
+    assert sc._hazards_up["p1"] == set()
+    assert sc._hazards_up["p2"] == {"stealth rock"}
