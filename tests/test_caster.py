@@ -1364,3 +1364,16 @@ def test_fabricated_recoil_detection():
     assert not c._fabricated_recoil(
         "The recoil finally caught up with it.", real_recoil)
     assert not c._fabricated_recoil("A devastating blow!", no_recoil)
+
+
+def test_mid_line_self_label_is_stripped():
+    """Take 50 T22 aired '...look stupid! FRACTURE: I'M LITERALLY RUNNING
+    OUT OF OPTIONS' — the model restarted the transcript format mid-line.
+    The colon marks a label; a vocative 'Prism,' survives."""
+    from crystal_broadcast.caster import _clean
+    assert _clean("FRACTURE: THEY KNEW! FRACTURE: I AM DONE!") == \
+        "THEY KNEW! I AM DONE!"
+    assert _clean("They waited it out! PRISM: the numbers agree.") == \
+        "They waited it out! the numbers agree."
+    assert _clean("Quit looking at the count, Prism, and watch me work!") == \
+        "Quit looking at the count, Prism, and watch me work!"

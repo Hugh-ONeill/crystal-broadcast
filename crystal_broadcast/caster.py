@@ -52,6 +52,17 @@ from crystal_broadcast.pts_clock import PresentationClock
 # the model mimics the transcript format and prefixes its own line with a
 # speaker label (sometimes stacked: "PRISM: PRISM: ..."); strip them all
 _SELF_LABEL = re.compile(r"^\s*(?:(?:PRISM|FRACTURE)\s*:\s*)+", re.I)
+# the same tic MID-line: take 50 T22 aired "...look stupid! FRACTURE: I'M
+# LITERALLY RUNNING OUT OF OPTIONS" — the model restarts the transcript
+# format inside its own line. The colon is what marks it as a label; a
+# vocative ("Prism, watch this") has none and survives.
+_MID_LABEL = re.compile(r"\s+(?:PRISM|FRACTURE)\s*:\s*", re.I)
+
+
+def _clean(raw: str) -> str:
+    """The full line hygiene pass: leading self-labels, mid-line label
+    restarts, then the bridge sanitizer."""
+    return _sanitize(_MID_LABEL.sub(" ", _SELF_LABEL.sub("", raw.strip())))
 
 PERSONA_DIR = Path(__file__).parent / "personas"
 DEFAULT_PORT = 8131
@@ -1462,7 +1473,7 @@ class Caster:
                 print(f"caster: generation failed for {persona}: {e!r}",
                       flush=True)
                 continue
-            line = _sanitize(_SELF_LABEL.sub("", raw.strip()))
+            line = _clean(raw)
             line = _fix_species_spelling(line, item)
             # facts-of-record guard: a fabricated crit is the common one
             # (a super-effective/heavy hit narrated as a "crit" that never
@@ -1476,7 +1487,7 @@ class Caster:
                         f"Do NOT mention {bad} — nothing in the beat "
                         f"establishes it. Name only Pokemon, moves and "
                         f"abilities the beat itself reports.")
-                    retry = _sanitize(_SELF_LABEL.sub("", raw.strip()))
+                    retry = _clean(raw)
                     retry = _fix_species_spelling(retry, item)
                     if retry and not self._ungrounded_entity(retry, item):
                         line = retry
@@ -1492,7 +1503,7 @@ class Caster:
                         "Do NOT say the move missed or whiffed — nothing in "
                         "the beat reports a miss. State only what the beat "
                         "reports.")
-                    retry = _sanitize(_SELF_LABEL.sub("", raw.strip()))
+                    retry = _clean(raw)
                     retry = _fix_species_spelling(retry, item)
                     if retry and not self._fabricated_miss(retry, item):
                         line = retry
@@ -1507,7 +1518,7 @@ class Caster:
                         self._generate_sync, persona, item,
                         f"WRONG: {contra}. Read the beat again and do not "
                         "reverse what it reports.")
-                    retry = _sanitize(_SELF_LABEL.sub("", raw.strip()))
+                    retry = _clean(raw)
                     retry = _fix_species_spelling(retry, item)
                     if retry and not self._contradicts_beat_effectiveness(
                             retry, item):
@@ -1527,7 +1538,7 @@ class Caster:
                         "only what the beat reports, and do not explain the "
                         "moment with a type interaction unless the beat says "
                         "so.")
-                    retry = _sanitize(_SELF_LABEL.sub("", raw.strip()))
+                    retry = _clean(raw)
                     retry = _fix_species_spelling(retry, item)
                     if retry and not self._bad_type_claim(retry, item):
                         line = retry
@@ -1545,7 +1556,7 @@ class Caster:
                         "away — the beat reports no hazard leaving the field. "
                         "A move called Rapid Spin does not prove one was "
                         "there. React to what the beat actually reports.")
-                    retry = _sanitize(_SELF_LABEL.sub("", raw.strip()))
+                    retry = _clean(raw)
                     retry = _fix_species_spelling(retry, item)
                     if retry and not self._fabricated_hazard_clear(retry, item):
                         line = retry
@@ -1561,7 +1572,7 @@ class Caster:
                         "Do NOT call this a critical hit or crit — nothing "
                         "in the beat says a critical hit happened. State only "
                         "what the beat reports.")
-                    retry = _sanitize(_SELF_LABEL.sub("", raw.strip()))
+                    retry = _clean(raw)
                     if retry and not self._fabricated_crit(retry, item):
                         line = retry
                 except Exception:
@@ -1577,7 +1588,7 @@ class Caster:
                         "Do NOT mention recoil — nothing in the beat reports "
                         "recoil damage. The beat states the move's real "
                         "effects; use those.")
-                    retry = _sanitize(_SELF_LABEL.sub("", raw.strip()))
+                    retry = _clean(raw)
                     if retry and not self._fabricated_recoil(retry, item):
                         line = retry
                 except Exception:
@@ -1591,7 +1602,7 @@ class Caster:
                         "Do NOT say any ability turns this status into an "
                         "advantage — the beat does not report that. Treat the "
                         "status as an ordinary status.")
-                    retry = _sanitize(_SELF_LABEL.sub("", raw.strip()))
+                    retry = _clean(raw)
                     if retry and not self._fabricated_synergy(retry, item):
                         line = retry
                 except Exception:
@@ -1606,7 +1617,7 @@ class Caster:
                         "Do NOT credit any ability for this — the move had no "
                         "effect because of a TYPE matchup, not the defender's "
                         "ability. Just report that it did nothing.")
-                    retry = _sanitize(_SELF_LABEL.sub("", raw.strip()))
+                    retry = _clean(raw)
                     if retry and not self._fabricated_immunity(retry, item):
                         line = retry
                 except Exception:
@@ -1626,7 +1637,7 @@ class Caster:
                         f"{stolen} this match — do not claim you told "
                         f"anyone, called it, or said so earlier. React to "
                         f"it fresh, in the present.")
-                    retry = _sanitize(_SELF_LABEL.sub("", raw.strip()))
+                    retry = _clean(raw)
                     retry = _fix_species_spelling(retry, item)
                     if retry and not self._stolen_call(retry, persona):
                         line = retry
@@ -1646,7 +1657,7 @@ class Caster:
                         "desk read back — the audience already sees the move "
                         "and the meter. Say what it MEANS, don't caption it.",
                         0.2)
-                    retry = _sanitize(_SELF_LABEL.sub("", raw.strip()))
+                    retry = _clean(raw)
                     if retry and not self._caption_phrasing(retry):
                         line = retry
                 except Exception:
@@ -1660,7 +1671,7 @@ class Caster:
                         "Do NOT start with the words your previous line "
                         "started with; change the sentence shape entirely.",
                         0.3)
-                    retry = _sanitize(_SELF_LABEL.sub("", raw.strip()))
+                    retry = _clean(raw)
                     if retry:
                         line = retry
                 except Exception:
@@ -1676,7 +1687,7 @@ class Caster:
                         f"You already used these stall images this match: "
                         f"{used}. Use a COMPLETELY different metaphor — reuse "
                         "none of their wording.", 0.3)
-                    retry = _sanitize(_SELF_LABEL.sub("", raw.strip()))
+                    retry = _clean(raw)
                     if retry and not self._stall_repeats(retry):
                         line = retry
                 except Exception:
