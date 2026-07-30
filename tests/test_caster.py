@@ -1666,3 +1666,41 @@ def test_boost_polarity_claim_detection():
     # no drop vocabulary -> abstain
     assert not c._boost_polarity_claim(
         "Zapdos has us reeling after that Hurricane!", their_drop)
+
+
+def test_fail_mechanism_claim_detection():
+    """Take 30 T5 — the founding case of the mechanical-guard item: 'the
+    Sucker Punch failed because Kingambit couldn't bypass that Tera Ghost
+    flip'. A failure is not an immunity, not a type matchup and not a miss;
+    the beat states the failure as bare fact and gives no reason, so a
+    mechanism in the line is invented. Legitimate fail reasoning passes."""
+    c = Caster("http://unused", "test-model", expert_url=None)
+    failed = {"text": "[BATTLE T5] Last exchange: their Kingambit's Sucker "
+                      "Punch failed against our Kommo-o. Kommo-o (95% hp) "
+                      "vs Kingambit (100% hp). Bodies: us 5 standing, "
+                      "them 3."}
+    real_immunity = {"text": "[BATTLE T9] Last exchange: our Kyurem's Earth "
+                             "Power had no effect on their Cinderace; their "
+                             "Slowking-Galar's Thunder Wave failed."}
+    assert c._fail_mechanism_claim(
+        "The Sucker Punch failed because Kingambit couldn't bypass that "
+        "Tera Ghost flip.", failed)
+    assert c._fail_mechanism_claim(
+        "That failed because Kommo-o is immune to it.", failed)
+    assert c._fail_mechanism_claim(
+        "Sucker Punch failed — it just missed the window.", failed)
+    # the correct reading: reason from what the TARGET did
+    assert not c._fail_mechanism_claim(
+        "Sucker Punch failed, which means Kommo-o never went for an "
+        "attack that turn.", failed)
+    # bare statement of the fact
+    assert not c._fail_mechanism_claim(
+        "The Sucker Punch failed outright.", failed)
+    # a REAL immunity in the beat -> the line has something to talk about
+    assert not c._fail_mechanism_claim(
+        "Earth Power did nothing there — Cinderace is immune after the "
+        "Tera, and the Thunder Wave failed too.", real_immunity)
+    # no failure in the beat at all
+    assert not c._fail_mechanism_claim(
+        "Kommo-o is immune to that.",
+        {"text": "[BATTLE T3] X vs Y. Bodies: us 6 standing, them 6."})

@@ -1120,6 +1120,41 @@ class Caster:
         text = (item.get("text") or "").lower()
         return not any(w in text for w in self._STAGE_SUPPORT)
 
+    _TYPE_MECHANISM = re.compile(
+        r"\b(?:immun\w+|no\s+effect|does(?:n't|\s+not)\s+affect|"
+        r"resist\w*|super[- ]effective|not\s+very\s+effective|"
+        r"bypass\w*|get\s+(?:past|through)|go\s+through|"
+        r"typ(?:e|ing)\s+(?:advantage|matchup|change|flip)|"
+        r"miss(?:ed|es)?|dodg\w+|evad\w+|evasion|whiff\w*)\b", re.I)
+
+    def _fail_mechanism_claim(self, line: str, item: dict) -> bool:
+        """True when a move FAILURE is explained by a type interaction, an
+        immunity or a miss — three distinct mechanics the desk conflates.
+
+        The founding case of this whole guard family, take 30 T5: 'the
+        Sucker Punch failed because Kingambit couldn't bypass that Tera
+        Ghost flip'. Sucker Punch fails when the TARGET did not attack;
+        typing has nothing to do with it, and Dark into Ghost is super
+        effective anyway. The director states the failure as bare fact and
+        deliberately offers no reason — so a mechanism supplied by the line
+        is the caster's invention, not the record's.
+
+        Same narrow shape as _miss_for_immunity: fires only when the beat
+        has a failure and NO real immunity or miss anywhere in it to be
+        talking about. Legitimate fail reasoning ('the target chose a
+        non-attacking move', 'Protect twice in a row') carries none of this
+        vocabulary and passes untouched."""
+        text = (item.get("text") or "").lower()
+        if "failed" not in text:
+            return False
+        if "had no effect" in text or "missed" in text:
+            return False
+        if not re.search(r"\bfail(?:ed|s|ing)?\b", line, re.I):
+            return False
+        return bool(self._TYPE_MECHANISM.search(
+            self._claim_sentence(line, re.search(
+                r"\bfail(?:ed|s|ing)?\b", line, re.I).start())))
+
     # "Boosts: our Kyurem -1 Defense, +1 Speed; their Zapdos -1 Special
     # Attack." — the footer names the side, the mon and the sign, which is
     # everything needed to tell a debuff we INFLICTED from one we took.
@@ -1935,6 +1970,25 @@ class Caster:
                         line = retry
                 except Exception:
                     pass
+            # fail-semantics guard: a failure explained by a type
+            # interaction, an immunity or a miss — the founding case of
+            # this family (take 30 T5), which the prompt fence alone
+            # did not hold
+            if line and self._fail_mechanism_claim(line, item):
+                try:
+                    raw = await asyncio.to_thread(
+                        self._generate_sync, persona, item,
+                        "The move FAILED — that is not a miss, not an "
+                        "immunity and not a type matchup, and the beat "
+                        "gives no reason for it. Do not explain the "
+                        "failure with typing, immunity or the dice. Say "
+                        "only that it failed, or reason from what the "
+                        "TARGET did.")
+                    retry = _clean(raw)
+                    if retry and not self._fail_mechanism_claim(retry, item):
+                        line = retry
+                except Exception:
+                    pass
             # boost-polarity guard: a stat drop credited to the wrong side
             if line and self._boost_polarity_claim(line, item):
                 m = self._BOOST_FOOTER.search(item.get("text") or "")
@@ -2157,6 +2211,8 @@ class Caster:
                      lambda: self._hazard_state_claim(line, item)),
                     ("boost polarity claim",
                      lambda: self._boost_polarity_claim(line, item)),
+                    ("fail mechanism claim",
+                     lambda: self._fail_mechanism_claim(line, item)),
                     ("fabricated recoil",
                      lambda: self._fabricated_recoil(line, item)),
                     ("fabricated synergy",
