@@ -1120,6 +1120,54 @@ class Caster:
         text = (item.get("text") or "").lower()
         return not any(w in text for w in self._STAGE_SUPPORT)
 
+    # "Boosts: our Kyurem -1 Defense, +1 Speed; their Zapdos -1 Special
+    # Attack." — the footer names the side, the mon and the sign, which is
+    # everything needed to tell a debuff we INFLICTED from one we took.
+    _BOOST_FOOTER = re.compile(r"Boosts: ([^.]*)\.")
+    _DROP_WORD = re.compile(
+        r"\b(?:drop|dropped|cut|gutted|lowered|slashed|sapped|"
+        r"weakened|debuff\w*|reduc\w+|tank\w*)\b", re.I)
+    _HARM_TO_US = re.compile(
+        r"\b(?:has|have|got|leaves?|left)\s+(?:us|me)\b"
+        r"|\b(?:us|me|our|my)\s+(?:reeling|crippled|gutted|ruined)\b"
+        r"|\bcrippl\w+\s+(?:us|me|our|my)\b"
+        r"|\bagainst\s+(?:us|me)\b", re.I)
+    _HARM_TO_THEM = re.compile(
+        r"\b(?:has|have|got|leaves?|left)\s+them\b"
+        r"|\bthem\s+(?:reeling|crippled|gutted|ruined)\b"
+        r"|\bcrippl\w+\s+(?:them|their)\b", re.I)
+
+    def _boost_polarity_claim(self, line: str, item: dict) -> bool:
+        """True when a stat-DROP is credited to the wrong side. Take 74 T3:
+        the footer read 'Boosts: their Zapdos -1 Special Attack' — OUR
+        Moonblast cut THEIR Zapdos, a debuff in our favour — and FRACTURE
+        aired 'Zapdos has us REELING with that Special Attack drop!',
+        turning our own successful debuff into an injury. Same family as
+        the luck-polarity inversion: the record names the side and the
+        sign, so the inversion is false by arithmetic.
+
+        Precision-first, like every guard here: fires only when negative
+        stages sit on EXACTLY ONE side of the footer, so there is no
+        binding to guess at."""
+        m = self._BOOST_FOOTER.search(item.get("text") or "")
+        if not m or not self._DROP_WORD.search(line):
+            return False
+        ours = theirs = False
+        for frag in m.group(1).split(";"):
+            # a NEGATIVE STAGE, not any hyphen — species names carry them
+            # ("their Slowking-Galar +1 Attack" is not a drop)
+            if not re.search(r"-\d", frag):
+                continue
+            if frag.strip().startswith("our "):
+                ours = True
+            elif frag.strip().startswith("their "):
+                theirs = True
+        if ours == theirs:              # both sides or neither: abstain
+            return False
+        if theirs:
+            return bool(self._HARM_TO_US.search(line))
+        return bool(self._HARM_TO_THEM.search(line))
+
     _HAZ_CLAIM = re.compile(
         r"\b(?:the|those|these|our|their)\s+(?:rocks|spikes|webs?|hazards)\b"
         r"|\bstealth\s+rock\b|\btoxic\s+spikes\b|\bsticky\s+web\b"
@@ -1887,6 +1935,25 @@ class Caster:
                         line = retry
                 except Exception:
                     pass
+            # boost-polarity guard: a stat drop credited to the wrong side
+            if line and self._boost_polarity_claim(line, item):
+                m = self._BOOST_FOOTER.search(item.get("text") or "")
+                frags = (m.group(1) if m else "")
+                if "their" in frags:
+                    note = ("The stat drop in this beat is on THEIR mon — "
+                            "WE cut it, and that is damage WE did. Do not "
+                            "frame it as harming us.")
+                else:
+                    note = ("The stat drop in this beat is on OUR mon — "
+                            "THEY cut it. Do not frame it as harming them.")
+                try:
+                    raw = await asyncio.to_thread(
+                        self._generate_sync, persona, item, note)
+                    retry = _clean(raw)
+                    if retry and not self._boost_polarity_claim(retry, item):
+                        line = retry
+                except Exception:
+                    pass
             if line and self._hazard_state_claim(line, item):
                 try:
                     raw = await asyncio.to_thread(
@@ -2088,6 +2155,8 @@ class Caster:
                      lambda: self._luck_polarity_claim(line, item)),
                     ("hazard state claim",
                      lambda: self._hazard_state_claim(line, item)),
+                    ("boost polarity claim",
+                     lambda: self._boost_polarity_claim(line, item)),
                     ("fabricated recoil",
                      lambda: self._fabricated_recoil(line, item)),
                     ("fabricated synergy",

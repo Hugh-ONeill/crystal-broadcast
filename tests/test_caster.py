@@ -1629,3 +1629,40 @@ def test_backlog_gate_still_drops_when_truly_congested():
     routine = {"text": "[BATTLE T12] X vs Y.",
                "beats": [{"beat": "chip", "priority": "filler"}]}
     assert c._speaking_backlog() >= c._backlog_limit(routine)
+
+
+def test_boost_polarity_claim_detection():
+    """Take 74 T3: footer 'Boosts: their Zapdos -1 Special Attack' — OUR
+    Moonblast cut THEIR Zapdos — aired as 'Zapdos has us REELING with that
+    Special Attack drop!'. The record names the side and the sign, so the
+    inversion is false by arithmetic."""
+    c = Caster("http://unused", "test-model", expert_url=None)
+    their_drop = {"text": "[BATTLE T3] Kyurem (100% hp) vs Zapdos (59% hp). "
+                          "Bodies: us 5 standing, them 5. "
+                          "Boosts: their Zapdos -1 Special Attack."}
+    our_drop = {"text": "[BATTLE T10] X vs Y. Bodies: us 4 standing, them 5. "
+                        "Boosts: our Iron Treads -1 Defense."}
+    both = {"text": "[BATTLE T12] X vs Y. Boosts: our Kyurem -1 Defense; "
+                    "their Zapdos -1 Special Attack."}
+    hyphen = {"text": "[BATTLE T9] X vs Y. "
+                      "Boosts: their Slowking-Galar +1 Attack."}
+    inverted = "Zapdos has us REELING with that Special Attack drop!"
+    assert c._boost_polarity_claim(inverted, their_drop)
+    # the same drop celebrated the right way round
+    assert not c._boost_polarity_claim(
+        "I GUTTED that Zapdos's Special Attack and now it does NOTHING!",
+        their_drop)
+    # our own drop grieved the right way round
+    assert not c._boost_polarity_claim(
+        "They cut my Defense and it has us REELING!", our_drop)
+    # our drop celebrated as harm to them — the mirror inversion
+    assert c._boost_polarity_claim(
+        "That Defense drop has them reeling!", our_drop)
+    # drops on both sides -> ambiguous, abstain
+    assert not c._boost_polarity_claim(inverted, both)
+    # a hyphenated species is not a negative stage
+    assert not c._boost_polarity_claim(
+        "Slowking-Galar has us reeling with that drop!", hyphen)
+    # no drop vocabulary -> abstain
+    assert not c._boost_polarity_claim(
+        "Zapdos has us reeling after that Hurricane!", their_drop)
