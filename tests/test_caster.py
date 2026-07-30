@@ -1592,3 +1592,40 @@ def test_hazard_state_claim_detection():
         "If they get the rocks up, our switching is taxed.", plain)
     assert not c._hazard_state_claim("This game is on the rocks.", plain)
     assert not c._hazard_state_claim("The hazards are gone at last!", plain)
+
+
+def test_backlog_limit_scales_and_bypasses_for_interrupts():
+    """Take 74 T10-T15: two queued lines (8.1-8.6s) sat above the 8.0s
+    per-beat budget, so every following beat was dropped for both voices
+    and the silence sustained itself — a KO, a Tera and the snow going up
+    never aired. The gate now scales to a multiple of the budget, and
+    interrupt-class beats buy a higher ceiling."""
+    c = Caster("http://unused", "test-model", expert_url=None)
+    c.speech_budget = 8.0
+    routine = {"text": "[BATTLE T12] X vs Y.",
+               "beats": [{"beat": "chip", "priority": "filler"}]}
+    big = {"text": "[BATTLE T10] Last exchange: our Kyurem's Icicle Spear "
+                   "knocked out their Zapdos. X vs Y.",
+           "beats": [{"beat": "ko", "priority": "interrupt"}]}
+    assert c._backlog_limit(routine) == 20.0
+    assert c._backlog_limit(big) == 32.0
+    # the take-74 backlog no longer silences either beat class
+    assert 8.6 < c._backlog_limit(routine)
+    assert 8.6 < c._backlog_limit(big)
+    # still bounded: a genuinely congested queue drops routine beats first
+    assert c._backlog_limit(routine) < c._backlog_limit(big)
+    # no budget -> no gating at all (text-only pacing unchanged)
+    c.speech_budget = None
+    assert c._backlog_limit(big) is None
+
+
+def test_backlog_gate_still_drops_when_truly_congested():
+    """The take-13 protection the gate exists for must survive: with speech
+    backed up far past the ceiling, a routine beat is still dropped."""
+    c = Caster("http://unused", "test-model", expert_url=None)
+    c.speech_budget = 8.0
+    c.speech = object()                      # a speech layer is present
+    c._speaking_until = time.monotonic() + 25.0
+    routine = {"text": "[BATTLE T12] X vs Y.",
+               "beats": [{"beat": "chip", "priority": "filler"}]}
+    assert c._speaking_backlog() >= c._backlog_limit(routine)

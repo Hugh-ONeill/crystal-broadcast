@@ -434,6 +434,35 @@ class Caster:
         """Seconds of queued speech still to play. 0.0 with no speech layer."""
         return max(0.0, self._speaking_until - time.monotonic())
 
+    # How much queued speech is tolerable before a beat is dropped unspoken,
+    # as a MULTIPLE of the per-beat budget. The gate used to compare a
+    # multi-line backlog against the single-beat budget, which is a category
+    # error: with an 8s budget and lines running 5-7s, two queued lines sit
+    # at 8.1-8.6s — already over — so every following beat was dropped for
+    # BOTH voices, and since a drop adds no speech the silence sustained
+    # itself until the TTS drained. Measured on take 74 (a WINNING take):
+    # beats T10-T15 went unspoken, taking a KO, a Tera + burn, and the snow
+    # going up off the broadcast entirely, with the transcript jumping
+    # T9 -> T17. Two lines of backlog is normal operation, not congestion.
+    BACKLOG_LIMIT_FACTOR = 2.5
+    # Interrupt-class beats (ko / tera / status / set_reveal / desk_swing)
+    # buy extra room: when something actually happened, the silence should
+    # land on housekeeping instead. Still bounded — nothing outruns this.
+    BACKLOG_HARD_FACTOR = 4.0
+
+    def _backlog_limit(self, item: dict) -> float | None:
+        """Seconds of backlog this beat is allowed to speak over, or None
+        when there is no budget to scale from. Priority bypass: a beat
+        carrying an interrupt-class beat gets the higher ceiling."""
+        if self.speech_budget is None:
+            return None
+        factor = self.BACKLOG_LIMIT_FACTOR
+        for b in item.get("beats") or []:
+            if (b or {}).get("priority") == "interrupt":
+                factor = self.BACKLOG_HARD_FACTOR
+                break
+        return self.speech_budget * factor
+
     def _log_pace_summary(self):
         """One-line per-match pacing report, the counterpart to the RAG one.
         The number that matters is beat age at voicing: how stale the thing
@@ -1672,14 +1701,16 @@ class Caster:
             # already backed up past the floor, this line would be late as
             # well as overlapping, so drop it. MATCH START and RESULT are
             # exempt: missing the opening or the verdict is worse than late.
+            limit = self._backlog_limit(item)
             if (self.speech is not None and self.speech_budget is not None
-                    and self._speaking_backlog() >= self.speech_budget
+                    and limit is not None
+                    and self._speaking_backlog() >= limit
                     and not item["text"].startswith(("[MATCH START]",
                                                      "[RESULT]"))):
                 self._pace_stats["preflight_drops"] += 1
                 print(f"caster: backlog dropped {persona} — "
                       f"{self._speaking_backlog():.1f}s of speech still "
-                      f"queued", flush=True)
+                      f"queued (limit {limit:.1f}s)", flush=True)
                 self._drops[persona] = self._drops.get(persona, 0) + 1
                 break
             if (idx and self.speech_budget is not None
