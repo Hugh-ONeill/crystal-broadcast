@@ -1414,3 +1414,67 @@ def test_drag_is_narrated_for_both_sides():
         "we were dragged out — Kommo-o is in",
         "they were dragged out — their Kyurem is in",
     ]
+
+
+# --- dice ledger: rage that builds (user-requested) -------------------------
+
+def _miss(sc, mover, move, target):
+    return sc.scan([
+        ["", "move", mover, move, target],
+        ["", "-miss", mover, target],
+        ["", "move", target, "Recover", target],   # flush the miss
+    ], role="p1")
+
+
+def test_dice_ledger_counts_misses_and_escalates_prose():
+    from crystal_broadcast.beat_director import classify
+    sc = ProtocolScanner()
+    sc.scan([
+        ["", "switch", "p1a: Kommo-o", "Kommo-o", "100/100"],
+        ["", "switch", "p2a: Toxapex", "Toxapex", "100/100"],
+    ], role="p1")
+    evs1 = _miss(sc, "p1a: Kommo-o", "Focus Blast", "p2a: Toxapex")
+    m1 = [e for e in evs1 if e.type == "move_missed"][0]
+    assert "dice" not in m1.prose                # first miss: no counter yet
+    assert m1.data["luck_count"] == 1
+    _miss(sc, "p1a: Kommo-o", "Focus Blast", "p2a: Toxapex")
+    evs3 = _miss(sc, "p1a: Kommo-o", "Focus Blast", "p2a: Toxapex")
+    m3 = [e for e in evs3 if e.type == "move_missed"][0]
+    assert m3.prose.endswith(
+        "— the third time the dice have gone against us this game")
+    # by the third the register escalates: accumulation, not instance
+    assert classify(m3).register == "escalating-grievance"
+
+
+def test_their_dice_streak_becomes_rejoicing():
+    from crystal_broadcast.beat_director import classify
+    sc = ProtocolScanner()
+    sc.scan([
+        ["", "switch", "p1a: Kommo-o", "Kommo-o", "100/100"],
+        ["", "switch", "p2a: Toxapex", "Toxapex", "100/100"],
+    ], role="p1")
+    for _ in range(2):
+        _miss(sc, "p2a: Toxapex", "Toxic", "p1a: Kommo-o")
+    evs = _miss(sc, "p2a: Toxapex", "Toxic", "p1a: Kommo-o")
+    m = [e for e in evs if e.type == "move_missed"][0]
+    assert m.prose.endswith(
+        "— the third time the dice have gone against them this game")
+    assert classify(m).register == "rejoicing"
+
+
+def test_cant_move_shares_the_ledger_but_recharge_does_not():
+    sc = ProtocolScanner()
+    sc.scan([
+        ["", "switch", "p1a: Kommo-o", "Kommo-o", "100/100"],
+        ["", "switch", "p2a: Toxapex", "Toxapex", "100/100"],
+    ], role="p1")
+    _miss(sc, "p1a: Kommo-o", "Focus Blast", "p2a: Toxapex")
+    evs = sc.scan([["", "cant", "p1a: Kommo-o", "par"]], role="p1")
+    c = [e for e in evs if e.type == "cant_move"][0]
+    assert c.prose.endswith(
+        "— the second time the dice have gone against us this game")
+    assert c.data["luck_count"] == 2
+    # recharge is a mechanic the mover chose, never a dice event
+    evs = sc.scan([["", "cant", "p1a: Kommo-o", "recharge"]], role="p1")
+    r = [e for e in evs if e.type == "cant_move"][0]
+    assert "dice" not in r.prose and r.data["luck_count"] is None

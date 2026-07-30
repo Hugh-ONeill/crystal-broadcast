@@ -128,6 +128,11 @@ def _poke_name(token: str) -> str:
     return token.split(": ", 1)[1] if ": " in token else token
 
 
+def _ordinal(n: int) -> str:
+    return {1: "first", 2: "second", 3: "third", 4: "fourth", 5: "fifth",
+            6: "sixth", 7: "seventh", 8: "eighth"}.get(n, f"{n}th")
+
+
 def _cond_name(raw: str) -> str:
     """'move: Stealth Rock' -> 'Stealth Rock'."""
     return raw.split(": ", 1)[1] if ": " in raw else raw
@@ -511,6 +516,11 @@ class ProtocolScanner:
         # opponent's copy isn't the current active — this is what let FRACTURE
         # call our fainted Clefable "their Cleric" while they had a Toxapex in.
         self._team_species: dict[str, set] = {}
+        # per-match dice ledger: 'us'/'them' -> count of luck events (misses
+        # + genuine cant_moves). Streaks are the story — "the FIFTH time the
+        # dice have gone against us" — and counting in the record keeps the
+        # rage grounded in fact rather than in her memory of it.
+        self._dice: dict = {}
 
 
     def _causer(self, trailing, qual, side_of, name_of):
@@ -675,10 +685,20 @@ class ProtocolScanner:
                 miss = f"{head} missed"
                 if target_disp and target_disp != mover_disp:
                     miss += f" {target_disp}"
+                n = None
+                if mover_side:
+                    self._dice[mover_side] = (
+                        self._dice.get(mover_side, 0) + 1)
+                    n = self._dice[mover_side]
+                    if n >= 2:
+                        who = "us" if mover_side == "us" else "them"
+                        miss += (f" — the {_ordinal(n)} time the dice have "
+                                 f"gone against {who} this game")
                 out.append(Event("move_missed", miss,
                                  side=mover_side,
                                  data={"mover": cur["mover"],
-                                       "move": cur["move"]}))
+                                       "move": cur["move"],
+                                       "luck_count": n}))
                 cur = None
                 return
             if cur.get("effect") == "no effect":
@@ -981,10 +1001,24 @@ class ProtocolScanner:
                 tmpl = _CANT.get(sm[3])
                 if tmpl:
                     flush()
+                    prose = tmpl.format(n=qual(sm[2]))
+                    s = side_of(sm[2])
+                    n = None
+                    # same dice ledger as misses — full para, frozen solid,
+                    # a flinch are luck; a Hyper Beam recharge is a mechanic
+                    # the mover chose, so it never counts
+                    if s and sm[3] != "recharge":
+                        self._dice[s] = self._dice.get(s, 0) + 1
+                        n = self._dice[s]
+                        if n >= 2:
+                            who = "us" if s == "us" else "them"
+                            prose += (f" — the {_ordinal(n)} time the dice "
+                                      f"have gone against {who} this game")
                     out.append(Event(
-                        "cant_move", tmpl.format(n=qual(sm[2])),
-                        side=side_of(sm[2]), notable=True,
-                        data={"mon": name_of(sm[2]), "why": sm[3]}))
+                        "cant_move", prose,
+                        side=s, notable=True,
+                        data={"mon": name_of(sm[2]), "why": sm[3],
+                              "luck_count": n}))
             elif t == "-enditem" and len(sm) > 3:
                 flush()
                 mon = name_of(sm[2])        # bare species for data + matching
@@ -1481,7 +1515,13 @@ def classify(ev: Event, stats_fn=None, ability_fn=None) -> Beat | None:
             "us" if (t == "cant_move" and ev.side == "us")
             or (t == "move_missed" and ev.side == "us") else "them")
         # a miss hurts the mover; cant hurts the afflicted — both are luck
-        # events for whoever suffered them
+        # events for whoever suffered them. By the THIRD dice event against
+        # a side the story is the accumulation, not the instance — her rage
+        # should build, and his glee should compound (user-requested; the
+        # count itself rides in the prose from the scanner's dice ledger)
+        if (ev.data.get("luck_count") or 0) >= 3:
+            reg = ("escalating-grievance" if ev.side == "us"
+                   else "rejoicing")
         return make_beat("crit_luck", ev.prose, register=reg, **ev.data)
     if t == "move_hit" and ev.data.get("crit"):
         # crit against us = persecution; ours = shameless delight (gc-0021/22)
