@@ -3,6 +3,8 @@ correction loop's substrate), AIRI-envelope compatibility, and the
 skip-don't-queue latency policy. The LLM is mocked — these drive the same
 seams the gold-set runner will."""
 import asyncio
+import contextlib
+import io
 import json
 import sys
 import time
@@ -1907,3 +1909,23 @@ def test_ko_dismissal_respects_negation():
         "Kyurem took that Ice Beam like a champ!", ko)
     # and the dismissal group is unaffected
     assert c._ko_dismissal_claim("That Ice Beam did NOTHING!", ko)
+
+
+def test_drop_message_names_the_offender():
+    """Guards that return WHAT offended had it thrown away, which made
+    drops undiagnosable: a MATCH START line was dropped for an ungrounded
+    entity sitting past the 90-char excerpt, so the log could not say
+    whether the fire was even correct."""
+    c = Caster("http://unused", "test-model", expert_url=None)
+    c._generate_sync = lambda persona, item, nudge=None, temp_boost=0.0: (
+        "A long opener that name-drops something unevidenced only much "
+        "later on, well past the old excerpt, namely Multiscale.")
+    c._ungrounded_entity = lambda line, item: (
+        "Multiscale" if "Multiscale" in line else None)
+    item = {"text": "[BATTLE T3] X vs Y.", "beats": [], "hud": None}
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        asyncio.run(c.speak(item))
+    out = buf.getvalue()
+    assert "ungrounded entity: Multiscale" in out
+    assert "Multiscale." in out          # excerpt now reaches the offender

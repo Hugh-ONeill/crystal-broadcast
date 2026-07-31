@@ -2374,11 +2374,24 @@ class Caster:
                     ("stolen call",
                      lambda: self._stolen_call(line, persona)),
                 )
-                offense = next(
-                    (name for name, chk in fact_checks if chk()), None)
+                # Several guards return WHAT offended (the ungrounded
+                # species, the false type claim) rather than a bare True,
+                # and throwing that away made drops undiagnosable: a
+                # MATCH START line reading "Kyurem holds the lead..." was
+                # dropped for an ungrounded entity that sat past the 90-char
+                # excerpt, so the log could not say whether the fire was
+                # even correct. Name the offender and show more of the line.
+                offense = None
+                for name, chk in fact_checks:
+                    found = chk()
+                    if found:
+                        offense = (name if found is True
+                                   else f"{name}: {found}")
+                        break
                 if offense:
                     print(f"caster: DROPPED {persona} line — {offense} "
-                          f"survived regeneration: {line[:90]!r}", flush=True)
+                          f"survived regeneration: {line[:160]!r}",
+                          flush=True)
                     self._drops[persona] = self._drops.get(persona, 0) + 1
                     continue
             if not line:
