@@ -1717,6 +1717,23 @@ class Caster:
         # hazard leaves the claim unsupported, which is exactly the take-26
         # case: the record was silent and the move's name filled the gap.
         beat = item.get("text") or ""
+        # A completed clear claimed while the Hazards: footer still lists
+        # hazards is false on its face — the rocks are right there in the
+        # record. This branch exists because adding that footer (2026-07-30)
+        # made the "mentions hazards at all" test below abstain on EVERY
+        # beat with hazards up, silently widening the hole it was guarding:
+        # grounding text counts as a hazard mention. The footer repays that
+        # with certainty the guard never had, so use it directly. Requires a
+        # PAST-TENSE clear (intent stays legal, which was the original false
+        # positive) and no real clearing event in the beat — when one side
+        # genuinely got spun the beat says so and the other side's leftover
+        # rocks must not convict a true line.
+        if (re.search(r"\bHazards:", beat)
+                and not re.search(r"\bclear\w*|\bspun\b|\bblown away\b|"
+                                  r"\bswept\b|\bremov\w+", beat, re.I)
+                and re.search(r"\b(?:cleared|removed|spun|swept|gone|"
+                              r"blown away)\b", line, re.I)):
+            return True
         return not Caster._HAZARD_WORD_RE.search(beat)
 
     @staticmethod

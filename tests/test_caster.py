@@ -1774,3 +1774,31 @@ def test_ko_dismissal_claim_detection():
         "That Icicle Spear did nothing!",
         {"text": "[BATTLE T4] our Kyurem's Icicle Spear hit their "
                  "Cinderace — barely a scratch."})
+
+
+def test_hazard_clear_guard_survives_the_footer():
+    """Adding the Hazards: footer (2026-07-30) silently widened this
+    guard's abstention — it grounds on 'does the beat mention hazards at
+    all', and the footer mentions them in every beat where any are up. A
+    completed clear claimed while the footer still lists them is false on
+    its face, so the footer now convicts instead of excusing."""
+    c = Caster("http://unused", "test-model", expert_url=None)
+    still_up = {"text": "[BATTLE T9] Last exchange: our Iron Treads's Rapid "
+                        "Spin hit their Zapdos. X vs Y. "
+                        "Hazards: our side Stealth Rock."}
+    really_cleared = {"text": "[BATTLE T9] Last exchange: our Iron Treads "
+                              "cleared Stealth Rock from our side with Rapid "
+                              "Spin. X vs Y. Hazards: their side Spikes."}
+    assert c._fabricated_hazard_clear("We spun the rocks away at last!",
+                                      still_up)
+    assert c._fabricated_hazard_clear("The hazards are gone.", still_up)
+    # intent stays legal — flagging it was the original false positive
+    assert not c._fabricated_hazard_clear(
+        "The search is looking to clear the rocks next turn.", still_up)
+    # a REAL clear, with the other side's hazards still listed, must pass
+    assert not c._fabricated_hazard_clear(
+        "We cleared the rocks off our side.", really_cleared)
+    # the take-26 case (record silent) still fires
+    assert c._fabricated_hazard_clear(
+        "We cleared the hazards away.",
+        {"text": "[BATTLE T9] X vs Y. We go for Rapid Spin."})
