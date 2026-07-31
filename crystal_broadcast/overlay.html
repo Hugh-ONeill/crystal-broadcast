@@ -422,6 +422,10 @@
       setDesk(d);
       setMoment(d.moment);
       setSources(d.citations);
+      // Flush the exchange at match seams: the wrap-up stands alone as an
+      // end card, and a new game opens on an empty log instead of
+      // inheriting the last line of the game before it.
+      if (d.phase === "start" || d.phase === "result") history = [];
       pushLine(d.persona, d.text);
     };
     ws.onclose = () => { setLive(false); retry(); };

@@ -69,3 +69,24 @@ if __name__ == "__main__":
             fn()
             print(f"ok {name}")
     print("panel tests passed")
+
+
+def test_overlay_marks_match_seams_for_the_client():
+    """The browser overlay only ever receives the sanitized reply, never
+    the beat text, so it cannot spot a new game on its own — and the
+    overlay process outlives a take, which left the previous game's closing
+    line sitting as the FIRST line of the next one (user-caught
+    2026-07-30). The feed tags the seams so the client can flush."""
+    import re
+    from pathlib import Path
+    src = Path(ok.__file__).with_name("commentary_overlay.py").read_text()
+    # the feed computes a phase for both seams and ships it in the payload
+    assert re.search(r'phase\s*=\s*\(\s*"start"\s+if\s+beat\.startswith\('
+                     r'"\[MATCH START\]"\)', src)
+    assert '"result" if beat.startswith("[RESULT]")' in src
+    assert "phase=phase," in src
+    # and the client empties its exchange on those seams
+    page = Path(ok.__file__).with_name("overlay.html").read_text()
+    assert 'd.phase === "start" || d.phase === "result"' in page
+    assert re.search(r'if \(d\.phase === "start" \|\| d\.phase === '
+                     r'"result"\) history = \[\];', page)

@@ -226,9 +226,21 @@ async def _source_listener(source: str):
                             hud["mom"] = _latest.get("mom")
                         if hud["read"] is None:
                             hud["read"] = _latest.get("read")
+                    # Tell the client where in a MATCH we are, so its
+                    # scrolling exchange can be flushed at the seams. The
+                    # client only ever receives the sanitized reply, never
+                    # the beat text, so it cannot spot a new game on its
+                    # own — and the overlay process outlives a take, so the
+                    # previous game's closing line was still sitting there
+                    # as the FIRST line of the next one (user-caught
+                    # 2026-07-30 across hunt takes).
+                    phase = ("start" if beat.startswith("[MATCH START]")
+                             else "result" if beat.startswith("[RESULT]")
+                             else None)
                     _latest.clear()
                     _latest.update(turn=_turn_of(beat), text=clean,
                                    persona=data.get("persona"),
+                                   phase=phase,
                                    citations=data.get("citations") or [],
                                    **hud)
                     who = data.get("persona") or "-"
