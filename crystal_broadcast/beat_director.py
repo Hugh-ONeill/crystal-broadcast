@@ -512,9 +512,13 @@ class ProtocolScanner:
         # (mover species, move, mover side) — side is what lets an effect
         # tell a SELF-inflicted drop from one the opponent caused
         self._last_move: tuple | None = None
-        # slot -> last residual damage source, for naming a
-        # non-move KO's actual cause
+        # slot -> (batch, last residual damage source), for naming a
+        # non-move KO's actual cause. The batch stamp is what keeps a
+        # source from outliving the exchange that produced it.
         self._residual: dict = {}
+        # incremented once per scan() call; the freshness clock for
+        # residual attribution
+        self._batch: int = 0
         # side key -> hazards currently up, so a removal move can be told
         # apart from a removal move with nothing to remove
         self._hazards_up: dict = {"p1": set(), "p2": set()}
@@ -558,6 +562,7 @@ class ProtocolScanner:
         return None, None
 
     def scan(self, messages, role=None) -> list[Event]:
+        self._batch += 1
         out: list[Event] = []
         cur = None
         pending_trick = None   # first half of a Trick/Switcheroo swap
@@ -834,7 +839,20 @@ class ProtocolScanner:
                     src = next((a.split("]", 1)[1].strip() for a in sm[4:]
                                 if a.startswith("[from]") and "]" in a), None)
                     if src:
-                        self._residual[key] = src.split(":")[-1].strip()
+                        # STAMPED with the current batch. Clearing on switch
+                        # (below) fixed a NEW occupant inheriting the old
+                        # one's source, but not the same occupant keeping a
+                        # source for its whole stay: take 76 T17, Iron
+                        # Valiant took Stealth Rock on entry at T11, lived
+                        # six more turns, then died to something the record
+                        # missed — and the faint handler popped that stale
+                        # entry, stating "Iron Valiant went down to the
+                        # Stealth Rock" about a mon that was at 94% and had
+                        # never re-entered. Residual chip and the faint it
+                        # causes always arrive in the SAME batch, so
+                        # same-batch is both sufficient and exactly tight.
+                        self._residual[key] = (self._batch,
+                                               src.split(":")[-1].strip())
                 # A HEAL was previously bookkeeping only and emitted no event,
                 # so the record showed our hit and then a target back near
                 # full with nothing in between. Measured live 2026-07-28: a
@@ -952,7 +970,10 @@ class ProtocolScanner:
                     cur["ko"] = True  # attribute to the finishing move
                 else:
                     flush()  # residual: poison/hazard/recoil/Life Orb etc.
-                    why = self._residual.pop(sm[2].split(":")[0], None)
+                    entry = self._residual.pop(sm[2].split(":")[0], None)
+                    # only a residual from THIS batch can explain this faint
+                    why = (entry[1] if entry and entry[0] == self._batch
+                           else None)
                     lm = self._last_move
                     if (not why and lm and len(lm) > 3 and lm[3] == mon
                             and lm[0] != mon):

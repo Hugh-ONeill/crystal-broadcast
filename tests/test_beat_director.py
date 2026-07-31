@@ -1731,3 +1731,37 @@ def test_tera_prose_article_agrees():
     ], role="p2")
     tera2 = next(e for e in evs2 if e.type == "tera")
     assert "into a Ghost type" in tera2.prose
+
+
+def test_stale_residual_does_not_explain_a_later_faint():
+    """Take 76 T17 (user-caught): Iron Valiant took Stealth Rock on entry,
+    survived six turns at 94%, then died — and the faint popped that stale
+    entry, stating 'Iron Valiant went down to the Stealth Rock' about a mon
+    that never re-entered. A residual only explains a faint from its OWN
+    batch."""
+    sc = ProtocolScanner()
+    sc.scan([
+        ["", "switch", "p2a: Iron Valiant", "Iron Valiant", "100/100"],
+        ["", "-damage", "p2a: Iron Valiant", "88/100", "[from] Stealth Rock"],
+    ], role="p2")
+    sc.scan([["", "move", "p2a: Iron Valiant", "Moonblast",
+              "p1a: Slowking-Galar"]], role="p2")
+    evs = sc.scan([["", "faint", "p2a: Iron Valiant"]], role="p2")
+    ko = next(e for e in evs if e.type == "ko")
+    assert "Stealth Rock" not in ko.prose
+    assert ko.data.get("cause") is None
+
+
+def test_same_batch_residual_still_names_the_cause():
+    """The attribution the ledger exists for must survive: poison chip and
+    the faint it causes arrive together."""
+    sc = ProtocolScanner()
+    sc.scan([["", "switch", "p2a: Ting-Lu", "Ting-Lu", "100/100"]],
+            role="p2")
+    evs = sc.scan([
+        ["", "-damage", "p2a: Ting-Lu", "0 fnt", "[from] psn"],
+        ["", "faint", "p2a: Ting-Lu"],
+    ], role="p2")
+    ko = next(e for e in evs if e.type == "ko")
+    assert "went down to the" in ko.prose
+    assert ko.data.get("cause") == "psn"
