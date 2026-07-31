@@ -1802,3 +1802,37 @@ def test_hazard_clear_guard_survives_the_footer():
     assert c._fabricated_hazard_clear(
         "We cleared the hazards away.",
         {"text": "[BATTLE T9] X vs Y. We go for Rapid Spin."})
+
+
+def test_speech_failures_are_announced_not_swallowed():
+    """Take 80 went MUTE from T17 to the wrap-up — six beats of text with
+    no voices — and not one line in any log said so, because speak()
+    returned None on every transport error. Silence beats losing the line;
+    silent silence is undiagnosable."""
+    import io
+    import contextlib
+    from crystal_broadcast.speech import Speech
+
+    sp = Speech.__new__(Speech)          # no network, no player thread
+    sp.url = "http://127.0.0.1:1"        # nothing listening
+    sp.timeout = 0.05
+    sp._fails = 0
+    sp._seconds = {}
+    sp._lock = __import__("threading").Lock()
+    sp._seq = 0
+    sp.out_dir = None
+    sp.play = False
+
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        assert sp.speak("PRISM", "a line") is None
+    out = buf.getvalue()
+    assert "FAILED" in out and "MUTE" in out
+    assert sp._fails == 1
+    # subsequent failures do not spam every line
+    buf2 = io.StringIO()
+    with contextlib.redirect_stdout(buf2):
+        for _ in range(3):
+            sp.speak("PRISM", "another line")
+    assert "FAILED" not in buf2.getvalue()
+    assert sp._fails == 4

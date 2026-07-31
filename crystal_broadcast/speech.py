@@ -55,6 +55,8 @@ class Speech:
         self.out_dir = Path(out_dir) if out_dir else None
         if self.out_dir:
             self.out_dir.mkdir(parents=True, exist_ok=True)
+        # consecutive failed renders; drives the mute warning in speak()
+        self._fails = 0
         self._seconds: dict[tuple[str, str], float] = {}
         self._lock = threading.Lock()
         self._seq = 0
@@ -101,10 +103,27 @@ class Speech:
             with urllib.request.urlopen(req, timeout=self.timeout) as r:
                 audio = r.read()
                 seconds = float(r.headers.get("X-Speech-Seconds") or 0) or None
-        except (urllib.error.URLError, OSError, ValueError):
-            return None            # silence beats losing the line
-        if seconds is None:
+        except (urllib.error.URLError, OSError, ValueError) as e:
+            # LOUDLY. Returning None silently is how the duo went mute for
+            # the last six beats of take 80 — text commentary kept flowing
+            # and the video simply had no voices from T17 to the wrap-up,
+            # with not one line in any log to say so. Silence beats losing
+            # the line, but silent silence is undiagnosable.
+            self._fails += 1
+            if self._fails == 1 or self._fails % 5 == 0:
+                print(f"speech: render FAILED ({self._fails} so far) — "
+                      f"{e!r}; the duo is MUTE until this recovers",
+                      flush=True)
             return None
+        if seconds is None:
+            self._fails += 1
+            print("speech: service returned no duration — treating as a "
+                  "failed render; the duo is MUTE for this line", flush=True)
+            return None
+        if self._fails:
+            print(f"speech: recovered after {self._fails} failed render(s)",
+                  flush=True)
+            self._fails = 0
         with self._lock:
             self._seconds[(persona, line)] = seconds
             self._seq += 1
@@ -138,8 +157,10 @@ class Speech:
                     subprocess.run(cmd, input=audio,
                                    stdout=subprocess.DEVNULL,
                                    stderr=subprocess.DEVNULL, check=False)
-            except Exception:
-                pass          # a missing player must not kill the thread
+            except Exception as e:
+                # a missing player must not kill the thread — but it must
+                # not take the audio down silently either (take 80)
+                print(f"speech: playback failed — {e!r}", flush=True)
             finally:
                 self._plays.task_done()
 
