@@ -128,6 +128,13 @@ def _poke_name(token: str) -> str:
     return token.split(": ", 1)[1] if ": " in token else token
 
 
+def _article(word: str) -> str:
+    """'a' / 'an' for a type name. The Tera line hardcoded 'a', so every
+    vowel-initial type read "Terastallized into a Ice type" — and the TTS
+    says it out loud (user-caught on take 76 T11)."""
+    return "an" if word[:1].upper() in "AEIOU" else "a"
+
+
 def _squash(s: str) -> str:
     """Case/punctuation-blind species comparison key — protocol details,
     poke-env display names and prose all format forms differently."""
@@ -1152,7 +1159,8 @@ class ProtocolScanner:
                 flush()
                 out.append(Event(
                     "tera",
-                    f"{name_of(sm[2])} Terastallized into a {sm[3]} type",
+                    f"{name_of(sm[2])} Terastallized into "
+                    f"{_article(sm[3])} {sm[3]} type",
                     side=side_of(sm[2]), notable=True,
                     data={"mon": name_of(sm[2]), "tera_type": sm[3]}))
             elif t == "-boost" and len(sm) > 4:

@@ -1713,3 +1713,21 @@ def test_court_change_swaps_scanner_hazard_ledger():
     ], role="p2")
     assert sc._hazards_up["p1"] == set()
     assert sc._hazards_up["p2"] == {"stealth rock"}
+
+
+def test_tera_prose_article_agrees():
+    """User-caught on take 76 T11: 'Terastallized into a Ice type' — the
+    article was hardcoded, and the TTS says it out loud."""
+    sc = ProtocolScanner()
+    evs = sc.scan([
+        ["", "switch", "p2a: Kyurem", "Kyurem", "100/100"],
+        ["", "-terastallize", "p2a: Kyurem", "Ice"],
+    ], role="p2")
+    tera = next(e for e in evs if e.type == "tera")
+    assert "into an Ice type" in tera.prose
+    evs2 = sc.scan([
+        ["", "switch", "p2a: Kommo-o", "Kommo-o", "100/100"],
+        ["", "-terastallize", "p2a: Kommo-o", "Ghost"],
+    ], role="p2")
+    tera2 = next(e for e in evs2 if e.type == "tera")
+    assert "into a Ghost type" in tera2.prose
