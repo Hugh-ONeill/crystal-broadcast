@@ -1811,28 +1811,72 @@ def test_speech_failures_are_announced_not_swallowed():
     silent silence is undiagnosable."""
     import io
     import contextlib
-    from crystal_broadcast.speech import Speech
 
-    sp = Speech.__new__(Speech)          # no network, no player thread
-    sp.url = "http://127.0.0.1:1"        # nothing listening
-    sp.timeout = 0.05
-    sp._fails = 0
-    sp._seconds = {}
-    sp._lock = __import__("threading").Lock()
-    sp._seq = 0
-    sp.out_dir = None
-    sp.play = False
-
+    sp = _offline_speech(timeout=0.05)
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
         assert sp.speak("PRISM", "a line") is None
     out = buf.getvalue()
     assert "FAILED" in out and "MUTE" in out
     assert sp._fails == 1
-    # subsequent failures do not spam every line
+    # the second failure trips the breaker rather than spamming the log
     buf2 = io.StringIO()
     with contextlib.redirect_stdout(buf2):
-        for _ in range(3):
-            sp.speak("PRISM", "another line")
+        assert sp.speak("PRISM", "another line") is None
     assert "FAILED" not in buf2.getvalue()
-    assert sp._fails == 4
+    assert sp._fails == sp.BREAKER_AFTER
+
+
+def _offline_speech(timeout=0.05):
+    """A Speech pointed at a dead port, with no player thread."""
+    import threading as _t
+    from crystal_broadcast.speech import Speech
+    sp = Speech.__new__(Speech)
+    sp.url = "http://127.0.0.1:1"
+    sp.timeout = timeout
+    sp._fails = 0
+    sp._breaker_until = 0.0
+    sp._seconds = {}
+    sp._lock = _t.Lock()
+    sp._seq = 0
+    sp.out_dir = None
+    sp.play = False
+    return sp
+
+
+def test_speech_breaker_stops_paying_the_timeout_every_line():
+    """Take 80: the service died and every following line sat on the full
+    timeout before returning None — six lines at 30s each, which dragged
+    beat-age-at-voicing to 83s and aired true commentary over a board it no
+    longer described. A dead TTS must cost the audio, not the timing."""
+    import io
+    import contextlib
+    import time as _time
+
+    sp = _offline_speech(timeout=0.05)
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        for _ in range(sp.BREAKER_AFTER):
+            sp.speak("PRISM", "a line")
+    assert sp._breaker_until > 0.0, "breaker must open"
+    assert "breaker OPEN" in buf.getvalue()
+
+    # subsequent calls return immediately — no socket, no timeout paid
+    t0 = _time.monotonic()
+    for _ in range(20):
+        assert sp.speak("PRISM", "another line") is None
+    assert _time.monotonic() - t0 < 0.05, "breaker must short-circuit"
+
+
+def test_speech_breaker_probes_cheaply_before_reopening():
+    """When the cooldown expires the tap reopens only if a 2s health probe
+    succeeds — a still-dead service must not cost a full render timeout
+    again."""
+    sp = _offline_speech()
+    sp._fails = sp.BREAKER_AFTER
+    sp._breaker_until = 1.0            # already expired (monotonic is larger)
+    probes = []
+    sp.available = lambda: (probes.append(1), False)[1]
+    assert sp.speak("PRISM", "a line") is None
+    assert probes, "expired cooldown must probe health"
+    assert sp._breaker_until > 0.0, "a failed probe re-arms the cooldown"

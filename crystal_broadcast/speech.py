@@ -16,6 +16,7 @@ import json
 import queue
 import subprocess
 import threading
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -40,12 +41,28 @@ class Speech:
     behind for the scheduler to read.
     """
 
+    # After this many consecutive failed renders the breaker opens and
+    # speak() stops calling the service until the cooldown expires. Take 80:
+    # the service died at T17 and every following line then sat on the full
+    # timeout before returning None — six lines at 30s each, which is what
+    # dragged beat-age-at-voicing to 83 SECONDS and made true commentary air
+    # over a board it no longer described. A dead TTS should cost the
+    # broadcast its audio, not its timing.
+    BREAKER_AFTER = 2
+    BREAKER_COOLDOWN = 30.0
+
     def __init__(self, url: str = DEFAULT_URL, play: bool = True,
-                 out_dir: str | None = None, timeout: float = 30.0,
+                 out_dir: str | None = None, timeout: float = 12.0,
                  sink: str | None = None):
         self.url = url.rstrip("/")
         self.play = play
+        # 12s, not 30: a render runs at roughly half realtime, so anything
+        # slower than the line itself has already missed its moment. The
+        # timeout is the per-line cost of discovering the service is gone,
+        # and it is paid on the publish path.
         self.timeout = timeout
+        # monotonic deadline while the breaker is open; 0.0 when closed
+        self._breaker_until = 0.0
         # Playback target. A recorder can only capture audio that reached a
         # SINK, so a take needs playback — but playing to the default sink
         # means a seven-minute take is audible in the room, and which device
@@ -94,6 +111,22 @@ class Speech:
         line = (line or "").strip()
         if not line:
             return None
+        # Breaker open: skip the call entirely rather than pay the timeout
+        # again. The caller falls back to the reading-rate estimate, so the
+        # duo degrades to text-only AT THE RIGHT MOMENTS instead of dragging
+        # the whole broadcast behind the picture.
+        now = time.monotonic()
+        if self._breaker_until:
+            if now < self._breaker_until:
+                return None
+            # cooldown expired: probe cheaply before reopening the tap, so a
+            # still-dead service costs 2s, not a full render timeout
+            if not self.available():
+                self._breaker_until = now + self.BREAKER_COOLDOWN
+                return None
+            print("speech: service is back — resuming audio", flush=True)
+            self._breaker_until = 0.0
+            self._fails = 0
         body = json.dumps({"persona": persona, "text": line,
                            "register": register}).encode()
         req = urllib.request.Request(
@@ -113,6 +146,13 @@ class Speech:
             if self._fails == 1 or self._fails % 5 == 0:
                 print(f"speech: render FAILED ({self._fails} so far) — "
                       f"{e!r}; the duo is MUTE until this recovers",
+                      flush=True)
+            if self._fails >= self.BREAKER_AFTER and not self._breaker_until:
+                self._breaker_until = (time.monotonic()
+                                       + self.BREAKER_COOLDOWN)
+                print(f"speech: breaker OPEN after {self._fails} failures — "
+                      f"skipping TTS for {self.BREAKER_COOLDOWN:.0f}s so the "
+                      f"commentary stays in sync with the picture",
                       flush=True)
             return None
         if seconds is None:
