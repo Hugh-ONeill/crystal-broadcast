@@ -2089,3 +2089,40 @@ def test_fabricated_crit_catches_adverb_forms():
         "PRISM's criticism of that switch is noted.", no_crit)
     assert not c._fabricated_crit(
         "I refuse to criticize my own play.", no_crit)
+
+
+def test_pending_outcome_claim_detection():
+    """Take 101 (a keeper) aired the pending choice as a completed action
+    twice: "The Shadow Claw landed" at T19 and "the momentum has swung back
+    following that Drain Punch" at T21, both about moves that had not
+    resolved. A prompt fence has forbidden this since take 30 and does not
+    hold — 'We go for X' is a decision, not an outcome."""
+    c = Caster("http://unused", "test-model", expert_url=None)
+    t19 = {"text": "[BATTLE T19] Last exchange: they go to Cinderace. "
+                   "Kommo-o (84% hp) vs Cinderace (20% hp). We go for "
+                   "Shadow Claw. Desk read: we're clearly ahead."}
+    t21 = {"text": "[BATTLE T21] Last exchange: they go to their Kingambit; "
+                   "our Kommo-o's Shadow Claw hit their Kingambit — not very "
+                   "effective. Kommo-o (38% hp) vs Kingambit (91% hp). "
+                   "We go for Drain Punch."}
+    both = {"text": "[BATTLE T18] Last exchange: our Kommo-o's Shadow Claw "
+                    "hit their Slowking-Galar — super effective and a "
+                    "devastating blow. Kommo-o (78% hp) vs Slowking-Galar "
+                    "(47% hp). We go for Shadow Claw."}
+    assert c._pending_outcome_claim(
+        "The Shadow Claw landed, and the math is back in our favor.", t19)
+    assert c._pending_outcome_claim(
+        "The momentum has swung back to Kommo-o following that Drain "
+        "Punch.", t21)
+    # the SAME move both resolved and pending: a past-tense claim is about
+    # the real one and must pass
+    assert not c._pending_outcome_claim(
+        "That Shadow Claw landed hard on Slowking-Galar.", both)
+    # intention and conditional framing stay legal
+    assert not c._pending_outcome_claim(
+        "The search is looking at Shadow Claw to chip through that bulk.",
+        t19)
+    assert not c._pending_outcome_claim(
+        "If Shadow Claw connects, Cinderace is gone.", t19)
+    assert not c._pending_outcome_claim(
+        "The search likes Drain Punch for the recovery here.", t21)

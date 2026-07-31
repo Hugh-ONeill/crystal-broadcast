@@ -1204,6 +1204,48 @@ class Caster:
                 return True
         return False
 
+    # The beat states the PENDING decision — "We go for Drain Punch." — as
+    # a choice, not an outcome; the turn has not resolved. A prompt fence
+    # has forbidden narrating it as done since take 30 and take 101 shows
+    # the fence does not hold: PRISM aired "The Shadow Claw landed" (T19)
+    # and "the momentum has swung back following that Drain Punch" (T21),
+    # both about moves still pending, and FRACTURE read the same tense
+    # backwards at T12. All three are one root cause.
+    _PENDING_MOVE = re.compile(
+        r"We (?:go for|switch to) ([A-Z][\w'-]*(?:\s[A-Z][\w'-]*)*)")
+    _EXCHANGE = re.compile(r"Last exchange:([^|]*?)(?:\s[A-Z][\w'-]*\s\(\d|$)")
+    _RESOLVED = re.compile(
+        r"\b(?:landed|connected|worked|paid off|did the job|went through|"
+        r"broke through|cleaned\s+\w+\s+up|following that|after that|"
+        r"knocked out|came down|resolved|got there|delivered)\b", re.I)
+
+    def _pending_outcome_claim(self, line: str, item: dict) -> bool:
+        """True when the line narrates the PENDING choice as already done.
+
+        Precision hinge: the same move often appears BOTH in the exchange
+        (it resolved last turn) and in the pending choice (we are throwing
+        it again) — "our Kommo-o's Shadow Claw hit their Slowking-Galar ...
+        We go for Shadow Claw." A past-tense claim is then about the real
+        one and must pass, so the guard abstains whenever the pending name
+        is also in the exchange. It fires only when the move exists purely
+        as an intention."""
+        text = item.get("text") or ""
+        m = self._PENDING_MOVE.search(text)
+        if not m:
+            return False
+        name = m.group(1).strip()
+        if len(name) < 4:
+            return False
+        ex = self._EXCHANGE.search(text)
+        exchange = (ex.group(1) if ex else "").lower()
+        if name.lower() in exchange:
+            return False                      # it also really happened
+        for fm in self._RESOLVED.finditer(line):
+            sent = self._claim_sentence(line, fm.start())
+            if name.lower() in sent.lower():
+                return True
+        return False
+
     _PREVIEW_LIST = re.compile(r"Their preview:\s*([^.]+)\.")
     _OUR_TEAM = re.compile(r"Our team:\s*([^.]+)\.")
     _THREATS = re.compile(
@@ -2209,6 +2251,22 @@ class Caster:
                         line = retry
                 except Exception:
                     pass
+            # pending-outcome guard: the turn has not resolved yet
+            if line and self._pending_outcome_claim(line, item):
+                try:
+                    raw = await asyncio.to_thread(
+                        self._generate_sync, persona, item,
+                        "That move has NOT happened yet — the beat states it "
+                        "as the choice we are about to make, not as an "
+                        "outcome. Do not say it landed, connected, worked, "
+                        "or that anything followed from it. Talk about what "
+                        "the beat reports as already done, or about what "
+                        "the choice is FOR.")
+                    retry = _clean(raw)
+                    if retry and not self._pending_outcome_claim(retry, item):
+                        line = retry
+                except Exception:
+                    pass
             # preview-lead guard: the opponent's lead is hidden at preview
             if line and self._preview_lead_claim(line, item):
                 try:
@@ -2502,6 +2560,8 @@ class Caster:
                      lambda: self._ko_dismissal_claim(line, item)),
                     ("preview lead claim",
                      lambda: self._preview_lead_claim(line, item)),
+                    ("pending outcome claim",
+                     lambda: self._pending_outcome_claim(line, item)),
                     ("fabricated recoil",
                      lambda: self._fabricated_recoil(line, item)),
                     ("fabricated synergy",
