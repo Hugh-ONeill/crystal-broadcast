@@ -2065,3 +2065,27 @@ def test_preview_consult_asks_about_the_engines_threats():
                      "Cinderace. We lead Kyurem.",
              "beats": [], "hud": None}
     assert c._strategy_consults(plain)
+
+
+def test_fabricated_crit_catches_adverb_forms():
+    """The pattern matched crit/crits/critical but not "CRITICALLY" — \\b
+    fails between "critical" and "ly" — so a crit invented in adverb form
+    walked past this guard and the drop backstop behind it. Found auditing
+    take 101, where the line happened to be grounded."""
+    c = Caster("http://unused", "test-model", expert_url=None)
+    no_crit = {"text": "[BATTLE T5] Last exchange: our Kyurem's Icicle Spear "
+                       "hit their Zapdos — super effective and a heavy hit."}
+    real_crit = {"text": "[BATTLE T5] Last exchange: our Kyurem's Icicle "
+                         "Spear knocked out their Zapdos with a critical "
+                         "hit and super effective."}
+    for line in ("That was a CRITICAL HIT!",
+                 "Their Kingambit just CRITICALLY deleted my Kingambit!",
+                 "A crit! Unbelievable.",
+                 "Those criticals are killing me."):
+        assert c._fabricated_crit(line, no_crit), line
+        assert not c._fabricated_crit(line, real_crit), line
+    # ordinary words that merely start with "crit" must not trip it
+    assert not c._fabricated_crit(
+        "PRISM's criticism of that switch is noted.", no_crit)
+    assert not c._fabricated_crit(
+        "I refuse to criticize my own play.", no_crit)

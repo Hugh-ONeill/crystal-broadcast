@@ -1020,7 +1020,13 @@ class Caster:
         a facts-of-record violation (a super-effective/heavy hit narrated as
         a 'crit'). The beat text carries 'critical hit' only when one really
         landed, so a crit word without it in the beat is invented."""
-        if not re.search(r"\bcrit(?:ical|s)?\b", line, re.I):
+        # ADVERB FORMS TOO. The original pattern missed "CRITICALLY deleted
+        # my Kingambit" — \b fails between "critical" and "ly" — so a crit
+        # invented in adverb form walked past this guard AND the drop
+        # backstop behind it. Found by auditing take 101's callouts, where
+        # the line happened to be grounded; nothing says the next one will
+        # be. "criticism"/"criticize" stay excluded on purpose.
+        if not re.search(r"\bcrit(?:s|icals?|ically)?\b", line, re.I):
             return False
         return "critical" not in (item.get("text") or "").lower()
 
