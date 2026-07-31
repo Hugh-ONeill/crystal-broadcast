@@ -1166,6 +1166,43 @@ class Caster:
                 return True
         return False
 
+    _KO_IN_BEAT = re.compile(
+        r"(\w[\w'-]*(?:\s+[A-Z][\w'-]*)?)'s\s+([A-Z][\w' -]*?)\s+"
+        r"knocked out\s+(?:our|their)?\s*([A-Z][\w-]*)")
+    _SURVIVED_FRAME = re.compile(
+        r"\b(?:did|does|do)\s+(?:absolutely\s+|literally\s+)?nothing\b"
+        r"|\bno\s+damage\b|\btook\s+(?:that|it|the)\b"
+        r"|\btank(?:ed|s)\b|\blike\s+a\s+champ\b|\bsurviv\w+\b"
+        r"|\bwalk(?:ed)?\s+it\s+off\b|\bshrug\w*\s+(?:it\s+)?off\b"
+        r"|\bheld\s+on\b|\bstill\s+standing\b|\bunfazed\b"
+        r"|\bbrush\w*\s+(?:it\s+)?off\b|\bbarely\s+scratch\w*\b", re.I)
+
+    def _ko_dismissal_claim(self, line: str, item: dict) -> bool:
+        """True when a KO is narrated as the victim SURVIVING, or as the
+        killing move doing nothing.
+
+        Take 76 T8 (user-flagged): the beat reads 'our Kyurem's Icicle
+        Spear knocked out their Cinderace with not very effective' and the
+        body count drops to 4 — and FRACTURE aired 'Cinderace just TOOK
+        THAT HIT like a champ! That Icicle Spear did NOTHING'. She bound to
+        the effectiveness tag and dropped the knockout, so the record says
+        dead and the broadcast says fine. Take 73 T20 was the same shape
+        ('A Hurricane that does NOTHING?' over a Hurricane that KO'd Iron
+        Treads) and was wrongly written off as rhetoric.
+
+        A not-very-effective KO is exactly the trap: the dismissive read is
+        RIGHT about the multiplier and catastrophically wrong about the
+        outcome. Bound tight — the dismissal must name the mon that died or
+        the move that killed it, so a 'did nothing' about some other move
+        in a crowded beat passes untouched."""
+        for m in self._KO_IN_BEAT.finditer(item.get("text") or ""):
+            move, victim = m.group(2).strip(), m.group(3).strip()
+            named = ((len(victim) >= 4 and victim.lower() in line.lower())
+                     or (len(move) >= 4 and move.lower() in line.lower()))
+            if named and self._SURVIVED_FRAME.search(line):
+                return True
+        return False
+
     _TYPE_MECHANISM = re.compile(
         r"\b(?:immun\w+|no\s+effect|does(?:n't|\s+not)\s+affect|"
         r"resist\w*|super[- ]effective|not\s+very\s+effective|"
@@ -2016,6 +2053,20 @@ class Caster:
                         line = retry
                 except Exception:
                     pass
+            # KO-dismissal guard: the record says dead, the line says fine
+            if line and self._ko_dismissal_claim(line, item):
+                try:
+                    raw = await asyncio.to_thread(
+                        self._generate_sync, persona, item,
+                        "That move KNOCKED THE TARGET OUT — it did not "
+                        "survive, it was not unfazed, and the move did not "
+                        "do nothing. A not-very-effective hit can still be "
+                        "lethal. React to the knockout.")
+                    retry = _clean(raw)
+                    if retry and not self._ko_dismissal_claim(retry, item):
+                        line = retry
+                except Exception:
+                    pass
             # item-polarity guard: an item that ACTIVATED read as a loss
             if line and self._item_polarity_claim(line, item):
                 try:
@@ -2275,6 +2326,8 @@ class Caster:
                      lambda: self._fail_mechanism_claim(line, item)),
                     ("item polarity claim",
                      lambda: self._item_polarity_claim(line, item)),
+                    ("ko dismissal claim",
+                     lambda: self._ko_dismissal_claim(line, item)),
                     ("fabricated recoil",
                      lambda: self._fabricated_recoil(line, item)),
                     ("fabricated synergy",

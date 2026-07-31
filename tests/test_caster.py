@@ -1738,3 +1738,39 @@ def test_item_polarity_claim_detection():
     # item not named in the line
     assert not c._item_polarity_claim(
         "We lost our speed advantage there.", activated)
+
+
+def test_ko_dismissal_claim_detection():
+    """Take 76 T8 (user-flagged): 'our Kyurem's Icicle Spear knocked out
+    their Cinderace with not very effective' aired as 'Cinderace just TOOK
+    THAT HIT like a champ! That Icicle Spear did NOTHING'. The dismissive
+    read is right about the multiplier and catastrophically wrong about the
+    outcome. Take 73 T20 was the same shape and was wrongly excused."""
+    c = Caster("http://unused", "test-model", expert_url=None)
+    ko = {"text": "[BATTLE T8] Last exchange: our Kyurem's Icicle Spear "
+                  "knocked out their Cinderace with not very effective; "
+                  "they go to Great Tusk. Kyurem (85% hp) vs Great Tusk "
+                  "(100% hp). Bodies: us 6 standing, them 4."}
+    hurricane = {"text": "[BATTLE T20] Last exchange: their Zapdos's "
+                         "Hurricane knocked out our Iron Treads with not "
+                         "very effective. Iron Treads (0% hp) vs Zapdos "
+                         "(68% hp)."}
+    crowded = {"text": "[BATTLE T9] Last exchange: our Kyurem's Icicle "
+                       "Spear knocked out their Cinderace; their Zapdos's "
+                       "Volt Switch hit our Kommo-o — barely a scratch."}
+    assert c._ko_dismissal_claim(
+        "Cinderace just TOOK THAT HIT like a champ! That Icicle Spear did "
+        "NOTHING and I am GLORIFIED!", ko)
+    assert c._ko_dismissal_claim("A Hurricane that does NOTHING?", hurricane)
+    assert c._ko_dismissal_claim("Cinderace survived that!", ko)
+    # reacting to the knockout is the correct read
+    assert not c._ko_dismissal_claim(
+        "That Icicle Spear DELETED Cinderace even resisted!", ko)
+    # a dismissal bound to a DIFFERENT move in a crowded beat passes
+    assert not c._ko_dismissal_claim(
+        "That Volt Switch did nothing at all.", crowded)
+    # no KO in the beat
+    assert not c._ko_dismissal_claim(
+        "That Icicle Spear did nothing!",
+        {"text": "[BATTLE T4] our Kyurem's Icicle Spear hit their "
+                 "Cinderace — barely a scratch."})
