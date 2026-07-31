@@ -2040,3 +2040,28 @@ def test_preview_widening_allows_a_previewed_mons_movepool():
         "The search is respecting Kingambit's Sucker Punch range early.",
         {"text": "[BATTLE T4] Iron Valiant (100% hp) vs Kingambit (90%)."}
     ) == "Sucker Punch"
+
+
+def test_preview_consult_asks_about_the_engines_threats():
+    """The wincon question must name the mons the ENGINE fears, not the
+    first two in the preview list — that order means nothing and reading
+    it as meaningful is the take-87 mistake."""
+    c = Caster("http://unused", "test-model", expert_url=None)
+    ranked = {"text": "[MATCH START] New battle vs FPTake99. Our team: "
+                      "Kyurem, Kingambit. Their preview: Slowking-Galar, "
+                      "Cinderace, Great Tusk, Kingambit, Kyurem, Zapdos. "
+                      "We lead Kyurem. The preview search reads their "
+                      "biggest threats as Great Tusk and Zapdos.",
+              "beats": [], "hud": None}
+    qs = c._strategy_consults(ranked)
+    assert qs, "team preview must ask a strategy question"
+    label, question = qs[0]
+    assert label == "Great Tusk"
+    assert "Great Tusk, Zapdos" in question
+    assert "win condition" in question
+    # with no engine ranking it still asks, falling back to the roster
+    plain = {"text": "[MATCH START] New battle vs FPTake99. Our team: "
+                     "Kyurem, Kingambit. Their preview: Slowking-Galar, "
+                     "Cinderace. We lead Kyurem.",
+             "beats": [], "hud": None}
+    assert c._strategy_consults(plain)

@@ -689,15 +689,26 @@ class Caster:
             # --wall-war, so in a normal game the opener has nothing to
             # reason from. Two mons is the retrievable form: naming the
             # whole six returns noise.
-            m = self._PREVIEW_LIST.search(text)
-            if m:
-                mons = [s.strip() for s in m.group(1).split(",") if s.strip()]
-                if len(mons) >= 2:
-                    pair = ", ".join(mons[:2])
-                    out.append((mons[0],
-                                f"what is the main win condition and biggest "
-                                f"threat on a competitive Pokemon team with "
-                                f"{pair}"))
+            # ASK ABOUT THE RIGHT TWO. The engine ranks their six by its own
+            # preview matrix and states the top of that ranking in the beat;
+            # taking the first two of the preview LIST instead would be the
+            # take-87 mistake again, since that order means nothing.
+            mons = []
+            tm = self._THREATS.search(text)
+            if tm:
+                mons = [s.strip() for s in re.split(r",| and ", tm.group(1))
+                        if s.strip()]
+            if len(mons) < 2:
+                pm = self._PREVIEW_LIST.search(text)
+                if pm:
+                    mons = [s.strip() for s in pm.group(1).split(",")
+                            if s.strip()]
+            if len(mons) >= 2:
+                pair = ", ".join(mons[:2])
+                out.append((mons[0],
+                            f"what is the main win condition and biggest "
+                            f"threat on a competitive Pokemon team with "
+                            f"{pair}"))
         for b in item.get("beats") or []:
             if b.get("beat") == "tera":
                 d = b.get("data") or {}
@@ -1189,6 +1200,8 @@ class Caster:
 
     _PREVIEW_LIST = re.compile(r"Their preview:\s*([^.]+)\.")
     _OUR_TEAM = re.compile(r"Our team:\s*([^.]+)\.")
+    _THREATS = re.compile(
+        r"biggest threats as\s*([^.]+)\.")
     # immediacy: the opposing mon is HERE, now, across from us
     _FACING = (r"(?:in|into|against|facing|versus|vs\.?|opposite|"
                r"across from|up against|staring (?:down|at))")

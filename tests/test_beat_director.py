@@ -1899,3 +1899,21 @@ def test_a_knockout_survives_the_highlight_window():
     d.observe(evs)
     dec = d.decide(_ctx(turn=9, me_name="Kyurem", opp_name="Cinderace"))
     assert "knocked out their Cinderace" in dec.text
+
+
+def test_match_start_states_the_engines_threat_read():
+    """The preview matrix already ranks OUR leads by its row minima; the
+    column-wise mirror says which of THEIR six we are least equipped to
+    answer. It died inside the picker, leaving the desk nothing to reason
+    from at preview but list order — which is how take 87 opened by naming
+    the first name in the list as their lead."""
+    d = Director()
+    text = d.match_start("FPTake99", ["Kyurem", "Kingambit"],
+                         ["Zapdos", "Cinderace", "Great Tusk"],
+                         lead="Kyurem",
+                         threats=["Great Tusk", "Zapdos", "Cinderace"])
+    assert "biggest threats as Great Tusk and Zapdos." in text
+    assert "Cinderace" not in text.split("threats as")[1]
+    # byte-unchanged when the engine offers no ranking
+    plain = d.match_start("FPTake99", ["Kyurem"], ["Zapdos"], lead="Kyurem")
+    assert "biggest threats" not in plain

@@ -2043,13 +2043,23 @@ class Director:
     # --- match framing -------------------------------------------------
     def match_start(self, opponent: str, our_team: list[str],
                     their_team: list[str], lead: str | None = None,
-                    archetype: str | None = None) -> str:
+                    archetype: str | None = None,
+                    threats: list[str] | None = None) -> str:
         self.reset()
         text = (f"[MATCH START] New battle vs {opponent or 'the opponent'}. "
                 f"Our team: {', '.join(our_team) or 'unknown'}. "
                 f"Their preview: {', '.join(their_team) or 'hidden'}.")
         if lead:
             text += f" We lead {lead}."
+        # WHICH of their six the preview search is least equipped to answer.
+        # The engine already computes a full lead payoff matrix and ranks OUR
+        # options by its row minima; this is the column-wise mirror, and it
+        # died inside the picker. Without it the desk has nothing to reason
+        # from at preview but list order — which is how "leads into that
+        # Slowking-Galar" happened (take 87: first name in the list, wrong).
+        if threats:
+            text += (" The preview search reads their biggest threats as "
+                     + " and ".join(threats[:2]) + ".")
         # engine-detected matchup archetype (stall mirror, sun, rain, ...):
         # a preview read the desk calls and the gremlin reacts to. Byte-
         # unchanged when no archetype is flagged.
