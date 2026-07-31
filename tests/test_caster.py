@@ -2126,3 +2126,33 @@ def test_pending_outcome_claim_detection():
         "If Shadow Claw connects, Cinderace is gone.", t19)
     assert not c._pending_outcome_claim(
         "The search likes Drain Punch for the recovery here.", t21)
+
+
+def test_health_gate_beat_is_never_dropped():
+    """The harness's synthetic gate beat has no board and no entities, so
+    any line about it is "ungrounded" — PRISM invented a Knock Off for one
+    and a Dragon Dance for another. Dropping there protects nothing and
+    breaks the gate, which requires a persona line as proof the caster can
+    generate: the drop removes the only evidence and the take dies on
+    HEALTH-FAIL-NOGEN."""
+    c = Caster("http://unused", "test-model", expert_url=None)
+    c._generate_sync = lambda p, i, nudge=None, temp_boost=0.0: (
+        "The Dragon Dance was necessary. There isn't another way to "
+        "pressure this side of the field.")
+    gate = {"text": "[bridge-test] pre-take health gate 104",
+            "beats": [], "hud": None}
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        asyncio.run(c.speak(gate))
+    assert "DROPPED" not in buf.getvalue()
+    assert c.transcript, "the gate must see a line"
+    # a real battle beat with the same invention still drops
+    c2 = Caster("http://unused", "test-model", expert_url=None)
+    c2._generate_sync = lambda p, i, nudge=None, temp_boost=0.0: (
+        "The Dragon Dance was necessary here.")
+    battle = {"text": "[BATTLE T4] Kyurem (80% hp) vs Zapdos (90% hp).",
+              "beats": [], "hud": None}
+    buf2 = io.StringIO()
+    with contextlib.redirect_stdout(buf2):
+        asyncio.run(c2.speak(battle))
+    assert "DROPPED" in buf2.getvalue()

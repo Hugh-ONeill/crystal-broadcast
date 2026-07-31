@@ -2585,6 +2585,17 @@ class Caster:
                         offense = (name if found is True
                                    else f"{name}: {found}")
                         break
+                # The harness's synthetic health-gate beat carries no board
+                # and no entities, so ANY line about it is "ungrounded" —
+                # PRISM invented a Knock Off for one and a Dragon Dance for
+                # another tonight. Dropping there protects nothing (the beat
+                # is never broadcast) and actively breaks the gate, which
+                # now requires a persona line as proof the caster can
+                # generate: the drop removes the only evidence and the take
+                # dies on HEALTH-FAIL-NOGEN. Guards police the broadcast,
+                # not the pre-flight check.
+                if offense and item["text"].startswith("[bridge-test]"):
+                    offense = None
                 if offense:
                     print(f"caster: DROPPED {persona} line — {offense} "
                           f"survived regeneration: {line[:160]!r}",
