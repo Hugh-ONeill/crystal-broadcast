@@ -1929,3 +1929,26 @@ def test_drop_message_names_the_offender():
     out = buf.getvalue()
     assert "ungrounded entity: Multiscale" in out
     assert "Multiscale." in out          # excerpt now reaches the offender
+
+
+def test_ko_dismissal_needs_the_dismissal_and_the_binding_together():
+    """SECOND FALSE POSITIVE, take 85 T19: the beat carried BOTH 'their
+    Zapdos's Thunder Wave failed against our Iron Crown' AND 'our Iron
+    Crown's Tachyon Cutter knocked out their Zapdos'. FRACTURE's 'THEY
+    CLICKED THUNDER WAVE AND IT DID NOTHING! I had their Zapdos exactly
+    where I wanted it' is TRUE — but the victim's name in one sentence was
+    bound to a dismissal of a different move in another."""
+    c = Caster("http://unused", "test-model", expert_url=None)
+    mixed = {"text": "[BATTLE T19] Last exchange: their Zapdos's Thunder "
+                     "Wave failed against our Iron Crown; our Iron Crown's "
+                     "Tachyon Cutter knocked out their Zapdos with not very "
+                     "effective; they go to their Kyurem."}
+    assert not c._ko_dismissal_claim(
+        "THEY CLICKED THUNDER WAVE AND IT DID NOTHING! I had their Zapdos "
+        "exactly where I wanted it.", mixed)
+    # dismissing the move that ACTUALLY killed still convicts
+    assert c._ko_dismissal_claim(
+        "That Tachyon Cutter did nothing!", mixed)
+    # and so does claiming the victim lived
+    assert c._ko_dismissal_claim(
+        "Zapdos took that like a champ!", mixed)

@@ -1211,16 +1211,26 @@ class Caster:
         in a crowded beat passes untouched."""
         for m in self._KO_IN_BEAT.finditer(item.get("text") or ""):
             move, victim = m.group(2).strip(), m.group(3).strip()
-            named = ((len(victim) >= 4 and victim.lower() in line.lower())
-                     or (len(move) >= 4 and move.lower() in line.lower()))
-            if not named:
-                continue
-            if self._DISMISS_FRAME.search(line):
-                return True
-            sm = self._SURVIVE_FRAME.search(line)
-            if sm and not self._SURVIVE_NEGATED.search(
-                    self._claim_sentence(line, sm.start())):
-                return True
+            for frame, negatable in ((self._DISMISS_FRAME, False),
+                                     (self._SURVIVE_FRAME, True)):
+                for fm in frame.finditer(line):
+                    # The dismissal must be IN THE SAME SENTENCE as the mon
+                    # that died or the move that killed it. Scoping this to
+                    # the whole line convicted a true statement (take 85
+                    # T19): the beat had "their Zapdos's Thunder Wave FAILED"
+                    # and, separately, "Tachyon Cutter knocked out their
+                    # Zapdos", and "THEY CLICKED THUNDER WAVE AND IT DID
+                    # NOTHING! I had their Zapdos exactly where I wanted it"
+                    # bound the victim's name in one sentence to a dismissal
+                    # of an entirely different move in another.
+                    sent = self._claim_sentence(line, fm.start())
+                    low = sent.lower()
+                    if not ((len(victim) >= 4 and victim.lower() in low)
+                            or (len(move) >= 4 and move.lower() in low)):
+                        continue
+                    if negatable and self._SURVIVE_NEGATED.search(sent):
+                        continue
+                    return True
         return False
 
     _TYPE_MECHANISM = re.compile(
