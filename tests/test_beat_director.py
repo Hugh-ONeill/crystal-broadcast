@@ -1677,16 +1677,20 @@ def test_field_footer_end_to_end_from_protocol():
 
 
 def test_hazard_footer_tracks_set_flip_and_clear():
+    """The setter travels WITH the condition: a Court Change moves which
+    side a hazard sits on, but not whose play put it there."""
     d = Director()
     d.observe([Event("hazard_set", "their Ting-Lu set Stealth Rock on our "
                      "side", side="us",
-                     data={"condition": "Stealth Rock", "user": "Ting-Lu"})])
+                     data={"condition": "Stealth Rock", "user": "Ting-Lu",
+                           "setter_side": "them"})])
     dec = d.decide(_ctx(turn=3))
-    assert "Hazards: our side Stealth Rock." in dec.text
+    assert "Hazards: Stealth Rock on our side, set by them." in dec.text
     d.observe([Event("hazard_flip", "Court Change swapped the hazards and "
                      "screens onto the opposite sides", notable=True)])
     dec2 = d.decide(_ctx(turn=5))
-    assert "Hazards: their side Stealth Rock." in dec2.text
+    # now sitting on THEIR side, still THEIR rocks
+    assert "Hazards: Stealth Rock on their side, set by them." in dec2.text
     d.observe([Event("hazard_cleared", "their Great Tusk cleared Stealth "
                      "Rock from their side with Rapid Spin", side="them",
                      notable=True,
@@ -1765,3 +1769,36 @@ def test_same_batch_residual_still_names_the_cause():
     ko = next(e for e in evs if e.type == "ko")
     assert "went down to the" in ko.prose
     assert ko.data.get("cause") == "psn"
+
+
+def test_hazard_footer_names_us_as_the_setter():
+    """Take 78 T20: our own Stealth Rock killed their re-entering Kyurem
+    and FRACTURE aired 'THEY JUST TRIPPED OVER THEIR OWN STEALTH ROCK',
+    crediting the opponent with our play. The prose says which SIDE a
+    hazard sits on and said nothing about who SET it, so the record must."""
+    sc = ProtocolScanner()
+    d = Director()
+    evs = sc.scan([
+        ["", "switch", "p2a: Iron Treads", "Iron Treads", "100/100"],
+        ["", "switch", "p1a: Great Tusk", "Great Tusk", "100/100"],
+        ["", "move", "p2a: Iron Treads", "Stealth Rock", "p1a: Great Tusk"],
+        ["", "-sidestart", "p1: someone", "move: Stealth Rock"],
+    ], role="p2")
+    hs = next(e for e in evs if e.type == "hazard_set")
+    assert hs.data["setter_side"] == "us"
+    d.observe(evs)
+    dec = d.decide(_ctx(turn=13, me_name="Iron Treads",
+                        opp_name="Great Tusk"))
+    assert "Hazards: Stealth Rock on their side, set by us." in dec.text
+
+
+def test_hazard_setter_defaults_to_the_opposite_side():
+    """With no move on record the setter is still knowable: hazards go up
+    on the OPPONENT's side, so the other side set them."""
+    sc = ProtocolScanner()
+    evs = sc.scan([
+        ["", "switch", "p2a: Iron Treads", "Iron Treads", "100/100"],
+        ["", "-sidestart", "p2: someone", "move: Spikes"],
+    ], role="p2")
+    hs = next(e for e in evs if e.type == "hazard_set")
+    assert hs.data["setter_side"] == "them"

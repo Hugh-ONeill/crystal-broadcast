@@ -1422,10 +1422,27 @@ class ProtocolScanner:
                 if low in _HAZARDS:
                     prose = (f"{who} set {cond} on {poss} side" if who
                              else f"{cond} went up on {poss} side")
+                    # WHOSE hazard, not just whose side. Take 78 T20: our
+                    # own Stealth Rock killed their re-entering Kyurem and
+                    # FRACTURE called it "THEY JUST TRIPPED OVER THEIR OWN
+                    # STEALTH ROCK" — handing the opponent credit for our
+                    # play. The prose says which SIDE a hazard sits on
+                    # (deliberately, since possessives on the condition read
+                    # as ownership) and nothing said who SET it, so the
+                    # personas guessed from the side and guessed wrong.
+                    # The mover's side is the setter; failing that, hazards
+                    # go up on the OPPONENT's side, so the setter is the
+                    # other one.
+                    haz_side = side_of(sm[2])
+                    lm = self._last_move
+                    setter = (lm[2] if lm and len(lm) > 2 and lm[2]
+                              else {"us": "them",
+                                    "them": "us"}.get(haz_side))
                     out.append(Event(
                         "hazard_set", prose,
-                        side=side_of(sm[2]),
-                        data={"condition": cond, "user": who}))
+                        side=haz_side,
+                        data={"condition": cond, "user": who,
+                              "setter_side": setter}))
                 elif low in _SCREENS:
                     prose = (f"{who} put {cond} up on {poss} side" if who
                              else f"{cond} went up on {poss} side")
@@ -1771,7 +1788,10 @@ class Director:
         # surfacing the CURRENT actives' stages (ctx names them every beat).
         self._weather: str | None = None
         self._screens: dict = {"us": set(), "them": set()}
-        self._hazards: dict = {"us": set(), "them": set()}
+        # side the hazard SITS on -> {condition: side that SET it}. The
+        # setter travels with the condition, so Court Change moves where a
+        # hazard sits without rewriting whose play put it there.
+        self._hazards: dict = {"us": {}, "them": {}}
         self._boosts: dict = {}
         self._prev_actives: tuple = (None, None)
 
@@ -1894,11 +1914,11 @@ class Director:
         elif t == "hazard_set":
             cond = ev.data.get("condition")
             if ev.side in self._hazards and cond:
-                self._hazards[ev.side].add(cond)
+                self._hazards[ev.side][cond] = ev.data.get("setter_side")
         elif t == "hazard_cleared":
             cond = (ev.data.get("condition") or "")
             if ev.side in self._hazards:
-                self._hazards[ev.side].discard(cond)
+                self._hazards[ev.side].pop(cond, None)
         elif t == "hazard_flip":
             # Court Change: hazards and screens change sides wholesale
             self._screens["us"], self._screens["them"] = (
@@ -2146,12 +2166,19 @@ class Director:
             scr.append("their " + " and ".join(sorted(self._screens["them"])))
         if scr:
             parts.append("Screens: " + "; ".join(scr) + ".")
+        # "Stealth Rock on their side, set by us" — the side AND the play.
+        # Naming only the side let the gremlin read "their side" as "theirs"
+        # and credit the opponent with our own hazard (take 78 T20).
         hz = []
-        if self._hazards["us"]:
-            hz.append("our side " + " and ".join(sorted(self._hazards["us"])))
-        if self._hazards["them"]:
-            hz.append("their side "
-                      + " and ".join(sorted(self._hazards["them"])))
+        for hside, poss in (("us", "our"), ("them", "their")):
+            by_setter: dict = {}
+            for cond, setter in sorted(self._hazards[hside].items()):
+                by_setter.setdefault(setter, []).append(cond)
+            for setter in sorted(by_setter, key=lambda s: str(s)):
+                frag = f"{' and '.join(by_setter[setter])} on {poss} side"
+                if setter in ("us", "them"):
+                    frag += f", set by {setter}"
+                hz.append(frag)
         if hz:
             parts.append("Hazards: " + "; ".join(hz) + ".")
         stages = []
