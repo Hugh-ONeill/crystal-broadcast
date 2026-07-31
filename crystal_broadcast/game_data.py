@@ -24,6 +24,7 @@ class GameData:
         self._gen = None
         self._status_moves = None
         self._entity_names = None
+        self._kits: dict = {}
 
     @property
     def gen(self):
@@ -69,6 +70,40 @@ class GameData:
         entry = self.gen.pokedex.get(_norm(display_name))
         ts = (entry or {}).get("types") or []
         return [t.title() for t in ts if isinstance(t, str)]
+
+    def species_kit(self, display_name: str) -> list[str]:
+        """Display names of every move a species can learn, plus its
+        abilities. Team preview publishes the roster, and what those six
+        CAN run is dex knowledge rather than anything observed — so at
+        preview it is fair evidence for the desk to reason from, while a
+        move on a mon that is not in the game at all still is not.
+        Cached: the lists are large and the same six recur all match."""
+        key = _norm(display_name)
+        hit = self._kits.get(key)
+        if hit is not None:
+            return hit
+        entry = self.gen.pokedex.get(key) or {}
+        out = []
+        # Walk the PREVO chain: Showdown stores an inherited move on the
+        # stage that first learns it, so Kingambit's own learnset has no
+        # Sucker Punch — it comes up from Pawniard. Reading only the final
+        # stage silently under-reports the kit by a third.
+        seen, cur = set(), key
+        while cur and cur not in seen:
+            seen.add(cur)
+            ls = (self.gen.learnset.get(cur) or {})
+            ls = ls.get("learnset", ls)
+            for mid in ls:
+                name = (self.gen.moves.get(mid) or {}).get("name")
+                if isinstance(name, str):
+                    out.append(name)
+            nxt = (self.gen.pokedex.get(cur) or {}).get("prevo")
+            cur = _norm(nxt) if isinstance(nxt, str) and nxt else None
+        for ab in (entry.get("abilities") or {}).values():
+            if isinstance(ab, str):
+                out.append(ab)
+        self._kits[key] = out
+        return out
 
     def effectiveness(self, atk_type: str, def_types) -> float | None:
         """Damage multiplier of one attacking type into a defender's typing.

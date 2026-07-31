@@ -677,6 +677,27 @@ class Caster:
         pre-generation off the event loop, and caches on the question — a
         repeat matchup is a cache hit."""
         out = []
+        text = item.get("text") or ""
+        if text.startswith("[MATCH START]"):
+            # PREVIEW consult. The desk already warms mechanics off the
+            # preview blob, but warming answers "what does X do" — nobody
+            # ever asks what the SIX of them add up to. Team preview is the
+            # one moment the analyst has the whole opposing roster and no
+            # board to describe, so it is exactly when a wincon/threat read
+            # is worth having; the archetype call-out that was meant to
+            # cover this only ever fires for a stall mirror under
+            # --wall-war, so in a normal game the opener has nothing to
+            # reason from. Two mons is the retrievable form: naming the
+            # whole six returns noise.
+            m = self._PREVIEW_LIST.search(text)
+            if m:
+                mons = [s.strip() for s in m.group(1).split(",") if s.strip()]
+                if len(mons) >= 2:
+                    pair = ", ".join(mons[:2])
+                    out.append((mons[0],
+                                f"what is the main win condition and biggest "
+                                f"threat on a competitive Pokemon team with "
+                                f"{pair}"))
         for b in item.get("beats") or []:
             if b.get("beat") == "tera":
                 d = b.get("data") or {}
@@ -1512,6 +1533,22 @@ class Caster:
             smoves = DATA.status_moves()
             for c in codes:
                 allowed += " " + " ".join(smoves.get(c, ()))
+        # TEAM PREVIEW widening. The preview beat names twelve species and
+        # nothing else, so an opener that reaches for what one of them RUNS
+        # ("Kingambit's Sucker Punch range") was convicted — three times in
+        # one hunt, and it is the analyst's scene-setter that dies. What a
+        # previewed mon can run is public dex knowledge, not invention; a
+        # move on a mon that is not in the game at all still is not.
+        beat_text = item.get("text") or ""
+        if beat_text.startswith("[MATCH START]"):
+            roster = []
+            for pat in (self._OUR_TEAM, self._PREVIEW_LIST):
+                mm = pat.search(beat_text)
+                if mm:
+                    roster += [s.strip() for s in mm.group(1).split(",")]
+            for mon in roster:
+                if mon:
+                    allowed += " " + " ".join(DATA.species_kit(mon))
         low, allowed_low = line.lower(), allowed.lower()
         for name in names:
             if len(name) < 4:

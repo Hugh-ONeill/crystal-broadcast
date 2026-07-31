@@ -2010,3 +2010,33 @@ def test_preview_lead_guard_abstains_on_mirror_species():
     assert c._preview_lead_claim(
         "The search is already eyeing that Great Tusk lead with concern.",
         start)
+
+
+def test_preview_widening_allows_a_previewed_mons_movepool():
+    """PRISM's scene-setter kept dying: the preview beat names twelve
+    species and nothing else, so reaching for what one of them RUNS
+    ("Kingambit's Sucker Punch range") was convicted three times in one
+    hunt. What a previewed mon CAN run is public dex knowledge; a move on a
+    mon that is not in the game still is not."""
+    c = Caster("http://unused", "test-model", expert_url=None)
+    start = ("[MATCH START] New battle vs FPTake99. Our team: Kingambit, "
+             "Iron Crown, Iron Treads, Iron Valiant, Kommo-o, Kyurem. "
+             "Their preview: Slowking-Galar, Cinderace, Great Tusk, "
+             "Kingambit, Kyurem, Zapdos. We lead Iron Valiant.")
+    c._beat_history.append(start)
+    item = {"text": start}
+    # a move a previewed mon genuinely learns now passes
+    assert c._ungrounded_entity(
+        "The search is respecting Kingambit's Sucker Punch range early.",
+        item) is None
+    assert c._ungrounded_entity(
+        "Great Tusk brings Rapid Spin to this matchup.", item) is None
+    # a move belonging to nobody in the game is still convicted
+    bad = c._ungrounded_entity(
+        "They will be leaning on Shell Smash to break through.", item)
+    assert bad == "Shell Smash"
+    # and the widening is preview-only: mid-battle beats stay strict
+    assert c._ungrounded_entity(
+        "The search is respecting Kingambit's Sucker Punch range early.",
+        {"text": "[BATTLE T4] Iron Valiant (100% hp) vs Kingambit (90%)."}
+    ) == "Sucker Punch"
