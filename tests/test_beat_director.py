@@ -1859,3 +1859,43 @@ def test_unknown_delayed_thrower_still_reads_grammatically():
     ko = next(e for e in evs if e.type == "ko")
     assert "None" not in ko.prose
     assert "Future Sight" in ko.prose
+
+
+def test_a_knockout_leads_its_turn():
+    """Take 87: a U-turn critical hit and a Future Sight KO landed on the
+    same beat. Both classify as 'interrupt' and the sort is stable, so the
+    chronologically earlier crit led and FRACTURE grieved it while her
+    Kommo-o lay dead. A death outranks a crit on a hit that did not kill."""
+    d = Director()
+    d.observe([
+        Event("move_hit", "their Cinderace's U-turn hit our Kommo-o — a "
+              "critical hit and not very effective", side="us", notable=True,
+              data={"mover": "Cinderace", "move": "U-turn", "crit": True,
+                    "target": "Kommo-o"}),
+        Event("ko", "their Slowking-Galar's Future Sight knocked out our "
+              "Kommo-o with super effective", side="us", notable=True,
+              data={"mover": "Slowking-Galar", "move": "Future Sight",
+                    "target": "Kommo-o"}),
+    ])
+    dec = d.decide(_ctx(turn=16, me_name="Kommo-o", me_hp=0,
+                        opp_name="Slowking-Galar"))
+    assert dec.beats, "the turn must produce beats"
+    assert dec.beats[0].beat == "ko", (
+        f"the death must lead, got {dec.beats[0].beat}")
+
+
+def test_a_knockout_survives_the_highlight_window():
+    """The last-4 exchange window must never trim a death out of a crowded
+    turn, whatever else happened."""
+    d = Director()
+    evs = [Event("boost", f"our Kyurem raised its Speed with Scale Shot {i}",
+                 side="us", notable=True,
+                 data={"mon": "Kyurem", "stat": "spe", "amount": 1})
+           for i in range(4)]
+    evs.append(Event("ko", "our Kyurem's Scale Shot knocked out their "
+                     "Cinderace", side="them", notable=True,
+                     data={"mover": "Kyurem", "move": "Scale Shot",
+                           "target": "Cinderace"}))
+    d.observe(evs)
+    dec = d.decide(_ctx(turn=9, me_name="Kyurem", opp_name="Cinderace"))
+    assert "knocked out their Cinderace" in dec.text

@@ -56,6 +56,21 @@ TAXONOMY = {
 }
 
 _PRIORITY_RANK = {"interrupt": 3, "normal": 2, "filler": 1, "silence": 0}
+# Within a priority band, a DEATH leads. "ko" and "crit_luck" are both
+# interrupt and the sort is stable, so the chronologically earlier event won
+# the turn — and on take 87 that meant FRACTURE grieved a U-turn critical
+# hit on the very beat where her Kommo-o was knocked out by Future Sight.
+# The knockout was correctly recorded and simply lost the tie. A death
+# outranks a crit on a hit that did not kill.
+_TIEBREAK_RANK = {"ko": 1}
+
+
+def _beat_rank(beat) -> tuple:
+    """Sort key for a classified beat: priority band, then death-first."""
+    if beat is None:
+        return (0, 0)
+    return (_PRIORITY_RANK.get(beat.priority, 0),
+            _TIEBREAK_RANK.get(beat.beat, 0))
 
 
 @dataclass
@@ -2142,9 +2157,8 @@ class Director:
                     if ev.prose]
             if len(cand) > 4:
                 ranked = sorted(
-                    cand, key=lambda t: (
-                        -(_PRIORITY_RANK.get(t[2].priority, 0)
-                          if t[2] else 0), -t[0]))
+                    cand, key=lambda t: (tuple(-x for x in _beat_rank(t[2]))
+                                         + (-t[0],)))
                 cand = sorted(ranked[:4], key=lambda t: t[0])
             # prefer the classified beat's prose: identical to the event's
             # for most beats, but carries added reads (the status-synergy
@@ -2270,7 +2284,7 @@ class Director:
         self._pending = []
         self._notable = False
 
-        beats.sort(key=lambda b: -_PRIORITY_RANK.get(b.priority, 0))
+        beats.sort(key=lambda b: tuple(-x for x in _beat_rank(b)))
         return Decision(" ".join(parts), beats, False)
 
     # --- ongoing-affliction callbacks (gc-0014) --------------------------
