@@ -1166,6 +1166,48 @@ class Caster:
                 return True
         return False
 
+    _PREVIEW_LIST = re.compile(r"Their preview:\s*([^.]+)\.")
+    # immediacy: the opposing mon is HERE, now, across from us
+    _FACING = (r"(?:in|into|against|facing|versus|vs\.?|opposite|"
+               r"across from|up against|staring (?:down|at))")
+    _LEADS = (r"(?:leads?|leading|opens?|opening|starts?|starting|"
+              r"is out|is in|is up|greets? us|came out|comes out)")
+
+    def _preview_lead_claim(self, line: str, item: dict) -> bool:
+        """True when a MATCH START line asserts WHICH mon the opponent
+        leads. The preview names six species and says nothing about their
+        order — it cannot, the lead is hidden until turn one — and the beat
+        states only OUR lead. Take 87 (the WINNING take, first line of the
+        broadcast): 'Iron Valiant leads into that Slowking-Galar', which
+        was simply the first name in the preview list. It was Kingambit.
+
+        Invisible to every other guard because Slowking-Galar IS in the
+        beat: the fabrication is the CLAIM, not the name. Fires only on
+        MATCH START, and only on a presence assertion — naming previewed
+        mons as threats ('heavy on physical pressure with Great Tusk and
+        Cinderace') is the analyst's job and must pass."""
+        text = item.get("text") or ""
+        if not text.startswith("[MATCH START]"):
+            return False
+        m = self._PREVIEW_LIST.search(text)
+        if not m:
+            return False
+        for mon in (s.strip() for s in m.group(1).split(",")):
+            if len(mon) < 4 or mon.lower() not in line.lower():
+                continue
+            esc = re.escape(mon)
+            if re.search(rf"{self._FACING}\s+(?:that\s+|the\s+|their\s+|"
+                         rf"a\s+)?{esc}\b", line, re.I):
+                return True
+            if re.search(rf"\b{esc}\b[^.!?]{{0,24}}?\b{self._LEADS}\b",
+                         line, re.I):
+                return True
+            if re.search(rf"\b(?:they|opponent)\b[^.!?]{{0,30}}?"
+                         rf"\b{self._LEADS}\b[^.!?]{{0,20}}?{esc}\b",
+                         line, re.I):
+                return True
+        return False
+
     _KO_IN_BEAT = re.compile(
         r"(\w[\w'-]*(?:\s+[A-Z][\w'-]*)?)'s\s+([A-Z][\w' -]*?)\s+"
         r"knocked out\s+(?:our|their)?\s*([A-Z][\w-]*)")
@@ -2100,6 +2142,22 @@ class Caster:
                         line = retry
                 except Exception:
                     pass
+            # preview-lead guard: the opponent's lead is hidden at preview
+            if line and self._preview_lead_claim(line, item):
+                try:
+                    raw = await asyncio.to_thread(
+                        self._generate_sync, persona, item,
+                        "You do NOT know which Pokemon they are leading — "
+                        "the preview lists their six in no order and the "
+                        "lead is hidden until turn one. Do not say we are "
+                        "facing or leading into any particular one of "
+                        "theirs. Talk about the matchup as a whole, or "
+                        "about our own lead.")
+                    retry = _clean(raw)
+                    if retry and not self._preview_lead_claim(retry, item):
+                        line = retry
+                except Exception:
+                    pass
             # KO-dismissal guard: the record says dead, the line says fine
             if line and self._ko_dismissal_claim(line, item):
                 try:
@@ -2375,6 +2433,8 @@ class Caster:
                      lambda: self._item_polarity_claim(line, item)),
                     ("ko dismissal claim",
                      lambda: self._ko_dismissal_claim(line, item)),
+                    ("preview lead claim",
+                     lambda: self._preview_lead_claim(line, item)),
                     ("fabricated recoil",
                      lambda: self._fabricated_recoil(line, item)),
                     ("fabricated synergy",

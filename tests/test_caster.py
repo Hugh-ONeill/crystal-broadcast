@@ -1952,3 +1952,38 @@ def test_ko_dismissal_needs_the_dismissal_and_the_binding_together():
     # and so does claiming the victim lived
     assert c._ko_dismissal_claim(
         "Zapdos took that like a champ!", mixed)
+
+
+def test_preview_lead_claim_detection():
+    """Take 87, first line of a WINNING broadcast: 'Iron Valiant leads into
+    that Slowking-Galar' — simply the first name in the preview list. It
+    was Kingambit. The preview names six species in no order and the lead
+    is hidden until turn one, so the beat states only OUR lead. Invisible
+    to the entity guard because Slowking-Galar IS in the beat: the
+    fabrication is the claim, not the name."""
+    c = Caster("http://unused", "test-model", expert_url=None)
+    start = {"text": "[MATCH START] New battle vs FPTake87. Our team: "
+                     "Kingambit, Iron Crown, Iron Treads, Iron Valiant, "
+                     "Kommo-o, Kyurem. Their preview: Slowking-Galar, "
+                     "Cinderace, Great Tusk, Kingambit, Kyurem, Zapdos. "
+                     "We lead Iron Valiant. Set the stage in a line or two."}
+    assert c._preview_lead_claim(
+        "Here we GO! Iron Valiant leads into that Slowking-Galar and I am "
+        "ALREADY feeling the pressure.", start)
+    assert c._preview_lead_claim(
+        "We are staring down Great Tusk right out of the gate.", start)
+    assert c._preview_lead_claim(
+        "They open with Cinderace and we have an answer.", start)
+    # naming previewed mons as THREATS is the analyst's job — must pass
+    assert not c._preview_lead_claim(
+        "The matchup is heavy on physical pressure with Great Tusk and "
+        "Cinderace in their preview.", start)
+    assert not c._preview_lead_claim(
+        "Slowking-Galar is the wall we have to solve this game.", start)
+    assert not c._preview_lead_claim(
+        "We lead Iron Valiant and the search likes the tempo.", start)
+    # in-battle beats know the actual active and are none of this guard's
+    # business
+    assert not c._preview_lead_claim(
+        "Iron Valiant leads into that Slowking-Galar.",
+        {"text": "[BATTLE T1] Iron Valiant (100% hp) vs Kingambit (100%)."})
