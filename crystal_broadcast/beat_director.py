@@ -738,10 +738,23 @@ class ProtocolScanner:
                     self._dice[mover_side] = (
                         self._dice.get(mover_side, 0) + 1)
                     n = self._dice[mover_side]
+                    who = "us" if mover_side == "us" else "them"
                     if n >= 2:
-                        who = "us" if mover_side == "us" else "them"
                         miss += (f" — the {_ordinal(n)} time the dice have "
                                  f"gone against {who} this game")
+                    else:
+                        # ALWAYS say who the dice went against. The ordinal
+                        # tells a streak story, which is why it started at
+                        # two — but the side effect was that a FIRST miss
+                        # named no beneficiary at all, and both observed
+                        # polarity inversions landed on exactly those:
+                        # take 98's Hurricane and take 105's Blizzard were
+                        # each a side's first miss, so the record said only
+                        # "their Kyurem's Blizzard missed our Kyurem" and
+                        # FRACTURE grieved a roll that had gone HER way.
+                        # Cheaper and more reliable than teaching a guard to
+                        # read her affect, which is ambiguous by design.
+                        miss += f" — the dice went against {who} there"
                 out.append(Event("move_missed", miss,
                                  side=mover_side,
                                  data={"mover": cur["mover"],

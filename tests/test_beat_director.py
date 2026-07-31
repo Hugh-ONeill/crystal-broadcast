@@ -1437,7 +1437,11 @@ def test_dice_ledger_counts_misses_and_escalates_prose():
     ], role="p1")
     evs1 = _miss(sc, "p1a: Kommo-o", "Focus Blast", "p2a: Toxapex")
     m1 = [e for e in evs1 if e.type == "move_missed"][0]
-    assert "dice" not in m1.prose                # first miss: no counter yet
+    # first miss: no ORDINAL yet, but the side is named from the start —
+    # an unattributed first miss is what let the gremlin grieve a roll that
+    # went her way (takes 98 and 105)
+    assert "time the dice have gone" not in m1.prose
+    assert "the dice went against us there" in m1.prose
     assert m1.data["luck_count"] == 1
     _miss(sc, "p1a: Kommo-o", "Focus Blast", "p2a: Toxapex")
     evs3 = _miss(sc, "p1a: Kommo-o", "Focus Blast", "p2a: Toxapex")
@@ -1917,3 +1921,29 @@ def test_match_start_states_the_engines_threat_read():
     # byte-unchanged when the engine offers no ranking
     plain = d.match_start("FPTake99", ["Kyurem"], ["Zapdos"], lead="Kyurem")
     assert "biggest threats" not in plain
+
+
+def test_every_miss_names_who_the_dice_went_against():
+    """The ordinal suffix started at the SECOND miss, so a side's first one
+    named no beneficiary — and both observed polarity inversions (take 98's
+    Hurricane, take 105's Blizzard) landed on exactly those, with FRACTURE
+    grieving a roll that had gone her way. Naming it in the record beats
+    teaching a guard to read her affect."""
+    sc = ProtocolScanner()
+    first = sc.scan([
+        ["", "switch", "p1a: Kyurem", "Kyurem", "100/100"],
+        ["", "switch", "p2a: Iron Crown", "Iron Crown", "100/100"],
+        ["", "move", "p1a: Kyurem", "Blizzard", "p2a: Iron Crown"],
+        ["", "-miss", "p1a: Kyurem", "p2a: Iron Crown"],
+        ["", "move", "p2a: Iron Crown", "Tachyon Cutter", "p1a: Kyurem"],
+    ], role="p2")
+    ev = next(e for e in first if e.type == "move_missed")
+    assert "the dice went against them there" in ev.prose
+    # the streak story still takes over from the second on
+    second = sc.scan([
+        ["", "move", "p1a: Kyurem", "Blizzard", "p2a: Iron Crown"],
+        ["", "-miss", "p1a: Kyurem", "p2a: Iron Crown"],
+        ["", "move", "p2a: Iron Crown", "Tachyon Cutter", "p1a: Kyurem"],
+    ], role="p2")
+    ev2 = next(e for e in second if e.type == "move_missed")
+    assert "the second time the dice have gone against them" in ev2.prose
