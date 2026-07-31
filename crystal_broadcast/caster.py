@@ -1169,13 +1169,27 @@ class Caster:
     _KO_IN_BEAT = re.compile(
         r"(\w[\w'-]*(?:\s+[A-Z][\w'-]*)?)'s\s+([A-Z][\w' -]*?)\s+"
         r"knocked out\s+(?:our|their)?\s*([A-Z][\w-]*)")
-    _SURVIVED_FRAME = re.compile(
+    # The move did nothing. These assert ineffectiveness directly and are
+    # not normally negated, so they convict on sight.
+    _DISMISS_FRAME = re.compile(
         r"\b(?:did|does|do)\s+(?:absolutely\s+|literally\s+)?nothing\b"
-        r"|\bno\s+damage\b|\btook\s+(?:that|it|the)\b"
+        r"|\bno\s+damage\b|\bbarely\s+scratch\w*\b", re.I)
+    # The victim lived. These are routinely NEGATED to say the opposite —
+    # "that Tera flip didn't change the matchups enough to survive" is a
+    # correct reading of a KO, and the first version of this guard read the
+    # word "survive" and dropped the line twice (take 82 T19, a good PRISM
+    # line lost). Negation flips their meaning, so check for it.
+    _SURVIVE_FRAME = re.compile(
+        r"\btook\s+(?:that|it|the)\b"
         r"|\btank(?:ed|s)\b|\blike\s+a\s+champ\b|\bsurviv\w+\b"
         r"|\bwalk(?:ed)?\s+it\s+off\b|\bshrug\w*\s+(?:it\s+)?off\b"
         r"|\bheld\s+on\b|\bstill\s+standing\b|\bunfazed\b"
-        r"|\bbrush\w*\s+(?:it\s+)?off\b|\bbarely\s+scratch\w*\b", re.I)
+        r"|\bbrush\w*\s+(?:it\s+)?off\b", re.I)
+    _SURVIVE_NEGATED = re.compile(
+        r"\b(?:didn't|did\s+not|doesn't|does\s+not|couldn't|could\s+not|"
+        r"wasn't|was\s+not|weren't|were\s+not|isn't|is\s+not|won't|"
+        r"will\s+not|not|never|no|failed\s+to|unable\s+to|"
+        r"nowhere\s+near)\b|n't\b", re.I)
 
     def _ko_dismissal_claim(self, line: str, item: dict) -> bool:
         """True when a KO is narrated as the victim SURVIVING, or as the
@@ -1199,7 +1213,13 @@ class Caster:
             move, victim = m.group(2).strip(), m.group(3).strip()
             named = ((len(victim) >= 4 and victim.lower() in line.lower())
                      or (len(move) >= 4 and move.lower() in line.lower()))
-            if named and self._SURVIVED_FRAME.search(line):
+            if not named:
+                continue
+            if self._DISMISS_FRAME.search(line):
+                return True
+            sm = self._SURVIVE_FRAME.search(line)
+            if sm and not self._SURVIVE_NEGATED.search(
+                    self._claim_sentence(line, sm.start())):
                 return True
         return False
 

@@ -1880,3 +1880,30 @@ def test_speech_breaker_probes_cheaply_before_reopening():
     assert sp.speak("PRISM", "a line") is None
     assert probes, "expired cooldown must probe health"
     assert sp._breaker_until > 0.0, "a failed probe re-arms the cooldown"
+
+
+def test_ko_dismissal_respects_negation():
+    """FALSE POSITIVE caught live, take 82 T19: our Kyurem Tera'd into Ice
+    and still died to Ice Beam, and PRISM's correct read — 'that Tera flip
+    didn't change the type matchups enough to survive' — was dropped twice
+    because the guard saw the word 'survive' and ignored the 'didn't'.
+    Negation flips these frames; a dropped true line is the expensive
+    direction."""
+    c = Caster("http://unused", "test-model", expert_url=None)
+    ko = {"text": "[BATTLE T19] Last exchange: Kyurem Terastallized into an "
+                  "Ice type; their Kyurem's Ice Beam knocked out our Kyurem. "
+                  "our Kyurem (0% hp) vs their Kyurem (92% hp)."}
+    # the line that was wrongly dropped
+    assert not c._ko_dismissal_claim(
+        "The Ice Beam was decisive. That Tera flip didn't change the type "
+        "matchups enough to survive.", ko)
+    assert not c._ko_dismissal_claim(
+        "Kyurem could not tank that Ice Beam.", ko)
+    assert not c._ko_dismissal_claim(
+        "Kyurem never stood a chance of surviving the Ice Beam.", ko)
+    # unnegated survival claims still convict
+    assert c._ko_dismissal_claim("Kyurem tanked that Ice Beam!", ko)
+    assert c._ko_dismissal_claim(
+        "Kyurem took that Ice Beam like a champ!", ko)
+    # and the dismissal group is unaffected
+    assert c._ko_dismissal_claim("That Ice Beam did NOTHING!", ko)
