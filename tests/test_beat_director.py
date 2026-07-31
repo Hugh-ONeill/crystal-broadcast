@@ -1802,3 +1802,60 @@ def test_hazard_setter_defaults_to_the_opposite_side():
     ], role="p2")
     hs = next(e for e in evs if e.type == "hazard_set")
     assert hs.data["setter_side"] == "them"
+
+
+def test_future_sight_ko_is_attributed_to_its_thrower():
+    """Take 80 T17 aired a bare 'Iron Valiant went down' and both personas
+    ignored the death: Future Sight lands two turns after it is thrown,
+    with no |move| line and no [from] tag, so nothing could attribute it.
+    The thrower is remembered against the SLOT it was aimed at."""
+    sc = ProtocolScanner()
+    sc.scan([
+        ["", "switch", "p1a: Slowking-Galar", "Slowking-Galar", "100/100"],
+        ["", "switch", "p2a: Iron Valiant", "Iron Valiant", "100/100"],
+        ["", "move", "p1a: Slowking-Galar", "Future Sight", "p2a: Iron Valiant"],
+    ], role="p2")
+    # ... two turns later, the thrower has since switched out ...
+    evs = sc.scan([
+        ["", "-end", "p2a: Iron Valiant", "move: Future Sight"],
+        ["", "-damage", "p2a: Iron Valiant", "0 fnt"],
+        ["", "faint", "p2a: Iron Valiant"],
+    ], role="p2")
+    ko = next(e for e in evs if e.type == "ko")
+    assert "their Slowking-Galar's Future Sight" in ko.prose
+    assert "our Iron Valiant" in ko.prose
+    assert ko.data.get("move") == "Future Sight"
+
+
+def test_future_sight_hits_whoever_occupies_the_slot():
+    """It targets a SLOT: the mon that eats it need not be the one that was
+    there when it was thrown."""
+    sc = ProtocolScanner()
+    sc.scan([
+        ["", "switch", "p1a: Slowking-Galar", "Slowking-Galar", "100/100"],
+        ["", "switch", "p2a: Iron Valiant", "Iron Valiant", "100/100"],
+        ["", "move", "p1a: Slowking-Galar", "Future Sight", "p2a: Iron Valiant"],
+    ], role="p2")
+    sc.scan([["", "switch", "p2a: Kommo-o", "Kommo-o", "100/100"]], role="p2")
+    evs = sc.scan([
+        ["", "-end", "p2a: Kommo-o", "move: Future Sight"],
+        ["", "-damage", "p2a: Kommo-o", "40/100"],
+    ], role="p2")
+    hit = [e for e in evs if "Future Sight" in e.prose]
+    assert hit, "the landing must be narrated, not silent"
+    assert "our Kommo-o" in hit[0].prose
+
+
+def test_unknown_delayed_thrower_still_reads_grammatically():
+    """A Future Sight thrown before the scan began has no remembered
+    thrower; the sentence must still parse."""
+    sc = ProtocolScanner()
+    evs = sc.scan([
+        ["", "switch", "p2a: Iron Valiant", "Iron Valiant", "100/100"],
+        ["", "-end", "p2a: Iron Valiant", "move: Future Sight"],
+        ["", "-damage", "p2a: Iron Valiant", "0 fnt"],
+        ["", "faint", "p2a: Iron Valiant"],
+    ], role="p2")
+    ko = next(e for e in evs if e.type == "ko")
+    assert "None" not in ko.prose
+    assert "Future Sight" in ko.prose

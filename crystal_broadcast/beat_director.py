@@ -399,6 +399,10 @@ _SYNERGY_NAME = {
 _HAZARDS = {"stealth rock", "spikes", "toxic spikes", "sticky web",
             "g-max steelsurge"}
 _SCREENS = {"reflect", "light screen", "aurora veil"}
+# Moves that strike two turns after they are thrown. The protocol sends no
+# |move| line when they land, so without special handling the damage and any
+# faint arrive with nothing to attribute them to.
+_DELAYED_ATTACKS = {"Future Sight", "Doom Desire"}
 # Moves whose NAME implies hazard removal. Measured on take 26: our Iron
 # Treads clicked Rapid Spin for the Speed boost and chip across a long
 # attrition stretch with NO hazards on the field, and both casters invented an
@@ -519,6 +523,9 @@ class ProtocolScanner:
         # incremented once per scan() call; the freshness clock for
         # residual attribution
         self._batch: int = 0
+        # target slot -> (thrower species, thrower side) for a delayed
+        # attack in flight, so it can be attributed when it lands
+        self._future: dict = {}
         # side key -> hazards currently up, so a removal move can be told
         # apart from a removal move with nothing to remove
         self._hazards_up: dict = {"p1": set(), "p2": set()}
@@ -654,8 +661,12 @@ class ProtocolScanner:
             # in that match were exactly the ones a mirror happened to mark.
             # Costs a little length; the alternative is leaving the single
             # most invertible fact in the beat to be guessed.
+            # A synthesised window (a delayed attack landing) has no position
+            # token — its thrower may be off the field entirely — but it does
+            # carry the side directly, so it can still be marked.
             mover_disp = (sided(cur["mover"], side_of(cur["mover_pos"]))
-                          if cur.get("mover_pos") else cur["mover"])
+                          if cur.get("mover_pos")
+                          else sided(cur["mover"], cur.get("mover_side")))
             target_disp = (sided(cur.get("target"),
                                  side_of(cur["target_pos"]))
                            if cur.get("target_pos") else cur.get("target"))
@@ -682,7 +693,10 @@ class ProtocolScanner:
                         f"clear — it was thrown for the chip and the boost",
                         side=side_of(cur["mover_pos"]),
                         data={"mon": cur["mover"], "move": cur["move"]}))
-            head = f"{mover_disp}'s {move_name}"
+            # an unknown thrower (a delayed attack whose move line predates
+            # this battle's scan) still gets a grammatical sentence
+            head = (f"{mover_disp}'s {move_name}" if mover_disp
+                    else f"the {move_name}")
             mover_side = cur.get("mover_side")
             target_side = ({"us": "them", "them": "us"}.get(mover_side)
                            if mover_side else None)
@@ -799,6 +813,16 @@ class ProtocolScanner:
             t = sm[1]
             if t == "move":
                 flush()
+                # Delayed attacks land TWO TURNS after they are thrown, by
+                # which time the attacker is usually off the field and there
+                # is no move line to bind to — so take 80 T17 aired a bare
+                # "Iron Valiant went down" and both personas ignored the
+                # death entirely. Remember the thrower against the SLOT it
+                # was aimed at (it hits whoever occupies that slot when it
+                # resolves, not the mon that was there when it was thrown).
+                if sm[3] in _DELAYED_ATTACKS and len(sm) > 4:
+                    self._future[sm[4].split(":")[0]] = (
+                        name_of(sm[2]), side_of(sm[2]))
                 cur = {"mover": name_of(sm[2]), "move": sm[3],
                        "mover_side": side_of(sm[2]), "mover_pos": sm[2],
                        "target": name_of(sm[4]) if len(sm) > 4 else None,
@@ -1357,6 +1381,28 @@ class ProtocolScanner:
                         "volatile_start", prose,
                         side=side_of(sm[2]), notable=entry[1],
                         data=data))
+            elif (t in ("-end", "-activate") and len(sm) > 3
+                    and _cond_name(sm[3]) in _DELAYED_ATTACKS):
+                # The delayed attack arrives. Synthesise the move window the
+                # protocol never sends, so the damage and any faint flow
+                # through the ordinary machinery and come out attributed
+                # ("their Slowking-Galar's Future Sight knocked out our Iron
+                # Valiant") instead of as an unexplained collapse.
+                flush()
+                move_name = _cond_name(sm[3])
+                slot = sm[2].split(":")[0]
+                thrower = self._future.pop(slot, None)
+                # the thrower is always on the other side; fall back to that
+                # when the original move line was never seen
+                mover_side = (thrower[1] if thrower
+                              else {"us": "them",
+                                    "them": "us"}.get(side_of(sm[2])))
+                cur = {"mover": thrower[0] if thrower else None,
+                       "move": move_name,
+                       "mover_side": mover_side, "mover_pos": None,
+                       "target": name_of(sm[2]), "target_pos": sm[2],
+                       "via": None, "effect": None, "crit": False,
+                       "dmg": None, "missed": False}
             elif t == "-end" and len(sm) > 3:
                 entry = _VOL_END.get(_cond_name(sm[3]).lower())
                 if entry:
