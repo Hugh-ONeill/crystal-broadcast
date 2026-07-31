@@ -1987,3 +1987,26 @@ def test_preview_lead_claim_detection():
     assert not c._preview_lead_claim(
         "Iron Valiant leads into that Slowking-Galar.",
         {"text": "[BATTLE T1] Iron Valiant (100% hp) vs Kingambit (100%)."})
+
+
+def test_preview_lead_guard_abstains_on_mirror_species():
+    """FALSE POSITIVE caught live, take 88: this matchup runs Kingambit AND
+    Kyurem on both teams, so 'We start with Kyurem in the lead' — TRUE, the
+    beat says we lead Kyurem — was convicted because Kyurem also appears in
+    their preview. A mirror species cannot be bound by name."""
+    c = Caster("http://unused", "test-model", expert_url=None)
+    start = {"text": "[MATCH START] New battle vs FPTake88. Our team: "
+                     "Kingambit, Iron Crown, Iron Treads, Iron Valiant, "
+                     "Kommo-o, Kyurem. Their preview: Slowking-Galar, "
+                     "Cinderace, Great Tusk, Kingambit, Kyurem, Zapdos. "
+                     "We lead Kyurem. Set the stage in a line or two."}
+    assert not c._preview_lead_claim(
+        "We start with Kyurem in the lead and I am ALREADY feeling the "
+        "heat! This is EXACTLY what we need to pressure that Slowking "
+        "early!", start)
+    assert not c._preview_lead_claim(
+        "Kingambit leads for us and that is the whole plan.", start)
+    # a NON-mirror species is still bindable and still convicts
+    assert c._preview_lead_claim(
+        "The search is already eyeing that Great Tusk lead with concern.",
+        start)

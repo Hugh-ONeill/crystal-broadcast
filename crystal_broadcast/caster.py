@@ -1167,6 +1167,7 @@ class Caster:
         return False
 
     _PREVIEW_LIST = re.compile(r"Their preview:\s*([^.]+)\.")
+    _OUR_TEAM = re.compile(r"Our team:\s*([^.]+)\.")
     # immediacy: the opposing mon is HERE, now, across from us
     _FACING = (r"(?:in|into|against|facing|versus|vs\.?|opposite|"
                r"across from|up against|staring (?:down|at))")
@@ -1192,8 +1193,18 @@ class Caster:
         m = self._PREVIEW_LIST.search(text)
         if not m:
             return False
+        # A MIRROR species is unbindable: this matchup runs Kingambit and
+        # Kyurem on BOTH teams, and "We start with Kyurem in the lead" —
+        # true, the beat says we lead Kyurem — was convicted because Kyurem
+        # is also in their preview. Whose it is cannot be told from the
+        # name, so abstain, exactly as the director does for mirror prose.
+        ours = self._OUR_TEAM.search(text)
+        our_mons = {s.strip().lower()
+                    for s in (ours.group(1).split(",") if ours else [])}
         for mon in (s.strip() for s in m.group(1).split(",")):
             if len(mon) < 4 or mon.lower() not in line.lower():
+                continue
+            if mon.lower() in our_mons:
                 continue
             esc = re.escape(mon)
             if re.search(rf"{self._FACING}\s+(?:that\s+|the\s+|their\s+|"
