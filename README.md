@@ -11,21 +11,38 @@ one way, engine to broadcast.
 
 ## Demo
 
-![Crystal Broadcast: the closing turns of a live game](docs/demo.gif)
+<!-- To get an inline player WITH SOUND, GitHub must host the file itself:
+     drag docs/kingambit-mirror-excerpt.mp4 into a new release (or any issue
+     comment) on github.com, copy the .../assets/... URL it generates, and
+     paste it below on its own line. A relative path renders as a link, not
+     a player. -->
 
-The closing turns of a real game against
+https://github.com/Hugh-ONeill/crystal-broadcast/assets/REPLACE-WITH-UPLOADED-URL
+
+Twenty seconds from a real game against
 [foul-play](https://github.com/pmariglia/foul-play) (winner of the PokeAgent
-NeurIPS 2025 gen9 OU track) — a trimmed excerpt of one continuous take, with no
-edits inside it. Everything on screen is generated as the game happens: the desk
-read on the left, both personas' lines, and when each one appears.
+NeurIPS 2025 gen9 OU track). Both sides bring Kingambit in, theirs sets up to
++2 Attack, and the desk splits the work: the analyst prices the threat, the
+answer lands, and the gremlin takes personal credit for it.
+
+The species mirror is the point. When both players have the same Pokemon on the
+field, every claim about whose move did what becomes ambiguous — and that is
+exactly where commentary systems say the opposite of what happened. Nothing in
+the clip gets it backwards.
 
 Nothing is scripted. The caster reads the same protocol stream the engine does,
-and a moment is only voiced if the director judged it worth saying.
+a moment is only voiced if the director judged it worth saying, and every
+factual claim is checked against the battle record before it airs — a line that
+contradicts the protocol is regenerated once and then dropped rather than
+spoken.
 
-Higher quality: the [36-second clip](docs/demo-finish.mp4) at full resolution,
-and the complete 43-turn game attached to the
+Both voices are Qwen3-TTS running locally, rendered per line as the game runs.
+
+The complete nine-minute game is attached to the
+[v0.2.0 release](https://github.com/Hugh-ONeill/crystal-broadcast/releases).
+Earlier silent clips, from before the voices existed: a
+[36-second excerpt](docs/demo-finish.mp4) and the
 [v0.1.0 release](https://github.com/Hugh-ONeill/crystal-broadcast/releases/tag/v0.1.0).
-No audio yet — TTS for the two voices is planned.
 
 ## The inversion
 
