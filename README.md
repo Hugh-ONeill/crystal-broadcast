@@ -11,13 +11,7 @@ one way, engine to broadcast.
 
 ## Demo
 
-<!-- To get an inline player WITH SOUND, GitHub must host the file itself:
-     drag docs/kingambit-mirror-excerpt.mp4 into a new release (or any issue
-     comment) on github.com, copy the .../assets/... URL it generates, and
-     paste it below on its own line. A relative path renders as a link, not
-     a player. -->
-
-https://github.com/Hugh-ONeill/crystal-broadcast/assets/REPLACE-WITH-UPLOADED-URL
+[DEMO](https://github.com/user-attachments/assets/9c3e66bb-6439-4a37-b7ec-9d136c4f82e0)
 
 Twenty seconds from a real game against
 [foul-play](https://github.com/pmariglia/foul-play) (winner of the PokeAgent
